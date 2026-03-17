@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Global Chat - PixelFeed</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  
+  <link rel="stylesheet" href="style.css">
+  
+  <script>
+      // Keep theme in sync instantly
+      if (localStorage.getItem('appTheme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  </script>
+  <style>
+    /* CHAT SPECIFIC STYLES */
+    .app-layout {
+        display: flex; flex-direction: column; align-items: center;
+        max-width: 900px; margin: 20px auto; padding: 0 20px; width: 100%;
+        height: calc(100vh - 100px); /* Fill the screen minus header */
+    }
+
+    .chat-container {
+        background: var(--container-bg); border: 1px solid var(--border-color);
+        border-radius: 8px; width: 100%; height: 100%; display: flex; flex-direction: column;
+        overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    .chat-header {
+        padding: 15px 20px; border-bottom: 1px solid var(--border-color);
+        font-weight: bold; font-size: 18px; color: var(--text-color);
+        display: flex; justify-content: space-between; align-items: center;
+        background: var(--hover-bg);
+    }
+
+    .chat-messages {
+        flex-grow: 1; padding: 20px; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 15px;
+        background: var(--container-bg);
+    }
+
+    .message-row { display: flex; gap: 10px; max-width: 80%; }
+    .message-row.self { align-self: flex-end; flex-direction: row-reverse; }
+
+    .chat-avatar {
+        width: 36px; height: 36px; border-radius: 50%; background: var(--hover-bg);
+        display: flex; justify-content: center; align-items: center; font-size: 16px;
+        color: var(--secondary-text); flex-shrink: 0; background-size: cover; background-position: center;
+    }
+
+    .message-content { display: flex; flex-direction: column; gap: 4px; }
+    .message-row.self .message-content { align-items: flex-end; }
+
+    .message-sender { font-size: 12px; color: var(--secondary-text); font-weight: bold; }
+    
+    .message-bubble {
+        padding: 10px 15px; border-radius: 18px; background: var(--input-bg);
+        color: var(--text-color); font-size: 15px; line-height: 1.4; word-wrap: break-word;
+        border-top-left-radius: 4px; /* Classic chat bubble tail */
+    }
+    
+    /* Style for YOUR messages */
+    .message-row.self .message-bubble {
+        background: #0079d3; color: white; border-top-left-radius: 18px; border-top-right-radius: 4px;
+    }
+
+    .chat-input-area {
+        padding: 15px 20px; border-top: 1px solid var(--border-color);
+        display: flex; gap: 10px; background: var(--container-bg); align-items: center;
+    }
+
+    .chat-input {
+        flex-grow: 1; padding: 12px 18px; border-radius: 25px; border: 1px solid var(--border-color);
+        background: var(--input-bg); color: var(--text-color); font-size: 15px; outline: none;
+        transition: border-color 0.2s;
+    }
+    .chat-input:focus { border-color: #0079d3; }
+
+    .send-btn {
+        width: 45px; height: 45px; border-radius: 50%; background: #0079d3; color: white;
+        border: none; cursor: pointer; font-size: 18px; display: flex; justify-content: center; align-items: center;
+        transition: 0.2s; flex-shrink: 0;
+    }
+    .send-btn:hover { background: #005a9e; transform: scale(1.05); }
+    .send-btn:active { transform: scale(0.95); }
+
+    .empty-chat { text-align: center; color: var(--secondary-text); margin-top: auto; margin-bottom: auto; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-left">
+        <a href="index.html" class="logo"><i class="fas fa-cube" style="margin-right: 8px;"></i>PixelFeed</a>
+    </div>
+    <div class="header-center">
+        <input type="text" class="search-bar" placeholder="Search disabled in chat" style="opacity: 0.5; pointer-events: none;">
+    </div>
+    <div class="header-right">
+      <a href="chat.html" class="nav-link" style="color: #0079d3;" title="Global Chat"><i class="fas fa-comments"></i> Chat</a>
+      <a href="profile.html" class="nav-link" title="Profile"><i class="fas fa-user-astronaut"></i> Profile</a>
+      <a href="settings.html" class="nav-link" title="Settings"><i class="fas fa-cog"></i> Settings</a>
+    </div>
+  </header>
+  
+  <div class="app-layout">
+      <div class="chat-container">
+          <div class="chat-header">
+              <span><i class="fas fa-globe"></i> Global Pixel Chat</span>
+              <button id="clear-chat-btn" style="background:none; border:none; color:var(--secondary-text); cursor:pointer;" title="Clear Chat History">
+                  <i class="fas fa-trash"></i>
+              </button>
+          </div>
+          
+          <div class="chat-messages" id="chat-box">
+              </div>
+
+          <div class="chat-input-area">
+              <input type="text" id="chat-input" class="chat-input" placeholder="Type a message..." autocomplete="off">
+              <button class="send-btn" id="send-btn"><i class="fas fa-paper-plane"></i></button>
+          </div>
+      </div>
+  </div>
+
+  <script>
+    // --- LOAD USER DATA ---
+    const getUsername = () => localStorage.getItem('customName') || 'Guest';
+    const getAvatar = () => localStorage.getItem('customAvatar') || null;
+
+    const chatBox = document.getElementById('chat-box');
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-btn');
+
+    // --- RENDER CHAT MESSAGES ---
+    function renderChat() {
+        chatBox.innerHTML = '';
+        const messages = JSON.parse(localStorage.getItem('pixelChat')) || [];
+        const currentName = getUsername();
+
+        if (messages.length === 0) {
+            chatBox.innerHTML = '<div class="empty-chat">No messages yet. Say hello! 👋</div>';
+            return;
+        }
+
+        messages.forEach(msg => {
+            const isMe = msg.username === currentName;
+            const row = document.createElement('div');
+            row.className = `message-row ${isMe ? 'self' : ''}`;
+            
+            // Set up Avatar HTML
+            let avatarHtml = `<div class="chat-avatar"><i class="fas fa-user-astronaut"></i></div>`;
+            if (msg.avatar) {
+                avatarHtml = `<div class="chat-avatar" style="background-image: url('${msg.avatar}');"></div>`;
+            }
+
+            row.innerHTML = `
+                ${avatarHtml}
+                <div class="message-content">
+                    <span class="message-sender">${msg.username} • ${msg.time}</span>
+                    <div class="message-bubble">${msg.text}</div>
+                </div>
+            `;
+            chatBox.appendChild(row);
+        });
+
+        // Auto-scroll to bottom
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // --- SEND MESSAGE LOGIC ---
+    function sendMessage() {
+        const text = chatInput.value.trim();
+        if (!text) return;
+
+        const messages = JSON.parse(localStorage.getItem('pixelChat')) || [];
+        
+        // Create new message object
+        const newMsg = {
+            id: Date.now(),
+            username: getUsername(),
+            avatar: getAvatar(),
+            text: text,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+
+        messages.push(newMsg);
+        localStorage.setItem('pixelChat', JSON.stringify(messages));
+        
+        chatInput.value = '';
+        renderChat();
+    }
+
+    // Send on button click
+    sendBtn.addEventListener('click', sendMessage);
+
+    // Send on Enter key press
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
+
+    // --- REAL-TIME SYNC ---
+    // This listens for storage changes from OTHER tabs!
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'pixelChat') {
+            renderChat();
+        }
+    });
+
+    // Admin tool to clear chat
+    document.getElementById('clear-chat-btn').addEventListener('click', () => {
+        if(confirm("Clear all global chat messages?")) {
+            localStorage.removeItem('pixelChat');
+            renderChat();
+        }
+    });
+
+    // Initial load
+    window.onload = renderChat;
+  </script>
+</body>
+</html>
