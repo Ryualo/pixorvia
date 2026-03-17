@@ -1,6 +1,7 @@
 // ==========================================
 // 1. CONFIGURATION & AUTHENTICATION
 // ==========================================
+const API_URL = 'https://ryualz.pythonanywhere.com/api';
 const IMGBB_API_KEY = 'd0c91137ced695243206c17f75dd6f0a'; 
 const ADMIN_NAME = 'Ryual'; 
 
@@ -10,7 +11,19 @@ if (!localStorage.getItem('customName')) {
 const getUsername = () => localStorage.getItem('customName');
 
 // ==========================================
-// 2. IMAGE PROCESSING & CLOUD UPLOADS
+// 2. NETWORK TIMEOUT CONTROLLER
+// ==========================================
+async function fetchWithTimeout(resource, options = {}) {
+    const { timeout = 12000 } = options;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    const response = await fetch(resource, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+}
+
+// ==========================================
+// 3. IMAGE PROCESSING & CLOUD UPLOADS
 // ==========================================
 async function pixelateImage(base64Str, pixelSize = 10) {
     return new Promise((resolve) => {
@@ -50,7 +63,7 @@ async function uploadToImgBB(base64Image) {
 }
 
 // ==========================================
-// 3. UI ELEMENTS & STATE VARIABLES
+// 4. UI ELEMENTS & STATE VARIABLES
 // ==========================================
 const createModal = document.getElementById('create-post-modal');
 const studioModal = document.getElementById('canvas-modal');
@@ -63,9 +76,10 @@ const retroToggleBox = document.getElementById('retro-toggle-box');
 
 let attachedFile = null;
 let hasDrawn = false;
+let globalPosts = []; // Stores the database posts
 
 // ==========================================
-// 4. DRAFT & MODAL MANAGEMENT
+// 5. DRAFT & MODAL MANAGEMENT
 // ==========================================
 document.getElementById('open-create-modal').addEventListener('click', () => {
     createModal.style.display = 'flex';
@@ -108,7 +122,7 @@ document.getElementById('close-create-modal').addEventListener('click', () => {
 });
 
 // ==========================================
-// 5. PIXEL STUDIO CONTROLS & ZOOM
+// 6. PIXEL STUDIO CONTROLS & ZOOM
 // ==========================================
 document.getElementById('open-canvas-btn').addEventListener('click', () => studioModal.style.display = 'flex');
 document.getElementById('close-studio-btn').addEventListener('click', () => studioModal.style.display = 'none');
@@ -135,7 +149,7 @@ document.getElementById('clear-canvas-btn').addEventListener('click', () => {
 });
 
 // ==========================================
-// 6. ADVANCED CANVAS LOGIC (Flood Fill & Shapes)
+// 7. ADVANCED CANVAS LOGIC (Flood Fill & Shapes)
 // ==========================================
 let isDrawing = false;
 ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -233,7 +247,7 @@ function drawPixel(e) {
 }
 
 // ==========================================
-// 7. MEDIA ATTACHMENT
+// 8. MEDIA ATTACHMENT
 // ==========================================
 document.getElementById('file-upload').addEventListener('change', (e) => {
     if(e.target.files[0]) {
@@ -249,29 +263,41 @@ document.getElementById('file-upload').addEventListener('change', (e) => {
 });
 
 // ==========================================
-// 8. FEED LOADING & SEARCH (Using Local Memory)
+// 9. HYBRID FEED LOADING (Python DB + Local UI)
 // ==========================================
-let localPosts = JSON.parse(localStorage.getItem('pixelPosts')) || [
-    {
-        id: 1,
-        username: "PixelMaster",
-        title: "Welcome to PixelFeed!",
-        body: "Draw something in the studio and share it below.",
-        media: "",
-        date: "Today",
-        votes: 42,
-        comments: []
-    }
-];
-
 const searchBar = document.getElementById('main-search-bar');
-searchBar.addEventListener('input', (e) => loadPosts(e.target.value));
+searchBar.addEventListener('input', (e) => renderPosts(e.target.value));
 
-function loadPosts(searchQuery = "") {
+async function loadPosts() {
+    const wrapper = document.getElementById('posts-wrapper');
+    wrapper.innerHTML = `
+        <div style="text-align: center; padding: 50px;">
+            <i class="fas fa-circle-notch fa-spin" style="font-size: 35px; color: #0079d3; margin-bottom: 15px;"></i>
+            <p style="color: var(--secondary-text); font-weight: bold; font-size: 14px;">Fetching from Python Server...</p>
+        </div>
+    `; 
+    
+    try {
+        const response = await fetchWithTimeout(`${API_URL}/posts`, { timeout: 15000 });
+        if (!response.ok) throw new Error("Server error");
+        
+        const posts = await response.json();
+        globalPosts = posts.reverse(); // Save server posts globally
+        renderPosts(searchBar.value);  // Call render function
+        
+    } catch (error) {
+        wrapper.innerHTML = '<p style="text-align:center; color: #ff4757; padding: 20px;">Could not connect to Python backend.</p>';
+    }
+}
+
+function renderPosts(searchQuery = "") {
     const wrapper = document.getElementById('posts-wrapper');
     const query = searchQuery.toLowerCase();
     
-    const filteredPosts = localPosts.filter(post => {
+    // Pull the memory of who voted and what they commented
+    let interactions = JSON.parse(localStorage.getItem('pixelInteractions')) || {};
+
+    const filteredPosts = globalPosts.filter(post => {
         return (post.title || '').toLowerCase().includes(query) || 
                (post.body || '').toLowerCase().includes(query) || 
                (post.username || '').toLowerCase().includes(query);
@@ -284,24 +310,39 @@ function loadPosts(searchQuery = "") {
         return;
     }
     
-    filteredPosts.forEach((post, index) => {
+    filteredPosts.forEach(post => {
         const isOwner = post.username === getUsername();
         const isAdminPoster = post.username === ADMIN_NAME; 
         const iAmAdmin = getUsername() === ADMIN_NAME; 
+        
+        // Grab local interactions for this specific post
+        let postData = interactions[post.id] || { votes: {}, comments: [] };
+        
+        // Calculate Vote limits (1 per user max)
+        let baseVotes = post.votes || 1;
+        let localVoteAdjust = 0;
+        for (let user in postData.votes) {
+            localVoteAdjust += postData.votes[user];
+        }
+        let displayVotes = baseVotes + localVoteAdjust;
+        
+        let myVote = postData.votes[getUsername()] || 0;
+        const upColor = myVote === 1 ? '#ff4500' : 'var(--secondary-text)';
+        const downColor = myVote === -1 ? '#7193ff' : 'var(--secondary-text)';
 
         const el = document.createElement('article');
         el.className = 'post';
         
         const mediaHtml = post.media ? `<img src="${post.media}" class="post-image-main" style="max-width: 100%; border-radius: 8px; margin-top: 10px;">` : '';
         const badgeHtml = isAdminPoster ? `<span class="admin-badge"><i class="fas fa-crown"></i> Admin</span>` : '';
-        const deleteHtml = (isOwner || iAmAdmin) ? `<button class="delete-btn" onclick="deletePost(${index})" style="background:none; border:none; color:#ff4757; cursor:pointer;"><i class="fas fa-trash"></i></button>` : '';
+        const deleteHtml = (isOwner || iAmAdmin) ? `<button class="delete-btn" onclick="deletePost(${post.id})" style="background:none; border:none; color:#ff4757; cursor:pointer;"><i class="fas fa-trash"></i></button>` : '';
         
         el.innerHTML = `
             <div style="display: flex; gap: 15px;">
                 <div class="vote-sidebar" style="display:flex; flex-direction:column; align-items:center;">
-                    <button onclick="handleVote(${index}, 1)" style="background:none; border:none; color:var(--secondary-text); cursor:pointer; font-size: 18px;">▲</button>
-                    <span class="score" style="font-weight:bold; margin: 5px 0;">${post.votes || 1}</span>
-                    <button onclick="handleVote(${index}, -1)" style="background:none; border:none; color:var(--secondary-text); cursor:pointer; font-size: 18px;">▼</button>
+                    <button onclick="handleVote(${post.id}, 1)" style="background:none; border:none; color:${upColor}; cursor:pointer; font-size: 20px; transition: 0.2s;"><i class="fas fa-arrow-up"></i></button>
+                    <span class="score" style="font-weight:bold; margin: 5px 0;">${displayVotes}</span>
+                    <button onclick="handleVote(${post.id}, -1)" style="background:none; border:none; color:${downColor}; cursor:pointer; font-size: 20px; transition: 0.2s;"><i class="fas fa-arrow-down"></i></button>
                 </div>
                 <div class="post-content" style="flex:1;">
                     <div class="post-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
@@ -313,21 +354,26 @@ function loadPosts(searchQuery = "") {
                         ${deleteHtml}
                     </div>
                     <h2 class="post-title" style="margin: 0 0 10px 0;">${post.title}</h2>
-                    <p class="post-body" style="margin: 0;">${post.body.replace(/\n/g, '<br>')}</p>
+                    <p class="post-body" style="margin: 0; line-height: 1.5;">${post.body.replace(/\n/g, '<br>')}</p>
                     ${mediaHtml}
 
                     <div style="margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 10px;">
-                        <button onclick="toggleComments(${index})" style="background:none; border:none; color:var(--secondary-text); cursor:pointer; font-weight:bold;">
-                            <i class="fas fa-comment"></i> ${post.comments ? post.comments.length : 0} Comments
+                        <button onclick="toggleComments(${post.id})" style="background:none; border:none; color:var(--secondary-text); cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:5px;">
+                            <i class="fas fa-comment-alt"></i> ${postData.comments.length} Comments
                         </button>
                         
-                        <div id="comment-section-${index}" style="display:none; margin-top: 15px;">
-                            <div id="comment-list-${index}" style="margin-bottom: 10px;">
-                                ${(post.comments || []).map(c => `<div style="font-size: 13px; margin-bottom: 8px; padding: 8px; background: rgba(0,0,0,0.03); border-radius: 4px;"><strong>@${c.user}:</strong> ${c.text}</div>`).join('')}
+                        <div id="comment-section-${post.id}" style="display:none; margin-top: 15px;">
+                            <div class="comments-container" style="max-height: 250px; overflow-y: auto; margin-bottom: 10px;">
+                                ${postData.comments.map(c => `
+                                    <div class="comment-bubble" style="background: rgba(0, 0, 0, 0.03); padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 3px solid #0079d3;">
+                                        <span class="comment-author" style="font-size: 12px; font-weight: bold; color: #0079d3; margin-bottom: 6px; display: block;"><i class="fas fa-user-circle"></i> ${c.user}</span>
+                                        <p class="comment-text" style="font-size: 14px; margin: 0;">${c.text}</p>
+                                    </div>
+                                `).join('')}
                             </div>
-                            <div style="display: flex; gap: 5px;">
-                                <input type="text" id="input-${index}" placeholder="Write a comment..." style="flex:1; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color);">
-                                <button onclick="addComment(${index})" style="padding: 8px 15px; background: #0079d3; color: white; border: none; border-radius: 4px; cursor:pointer;">Post</button>
+                            <div style="display: flex; gap: 10px;">
+                                <input type="text" id="input-${post.id}" placeholder="Add a comment..." style="flex:1; padding: 10px; border-radius: 20px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-color); outline: none;">
+                                <button onclick="addComment(${post.id})" style="background: #0079d3; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer;"><i class="fas fa-paper-plane"></i></button>
                             </div>
                         </div>
                     </div>
@@ -339,39 +385,66 @@ function loadPosts(searchQuery = "") {
 }
 
 // ==========================================
-// 9. NEW INTERACTIVE FEATURES (Votes & Comments)
+// 10. INTERACTIVE LOGIC (Votes & Comments)
 // ==========================================
-window.handleVote = (index, change) => {
-    localPosts[index].votes = (localPosts[index].votes || 1) + change;
-    localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
-    loadPosts(document.getElementById('main-search-bar').value);
+window.handleVote = (postId, change) => {
+    let interactions = JSON.parse(localStorage.getItem('pixelInteractions')) || {};
+    if (!interactions[postId]) interactions[postId] = { votes: {}, comments: [] };
+    
+    const user = getUsername();
+    let currentVote = interactions[postId].votes[user] || 0;
+    
+    if (currentVote === change) {
+        interactions[postId].votes[user] = 0; // Click again to remove vote
+    } else {
+        interactions[postId].votes[user] = change; // Cast new vote
+    }
+    
+    localStorage.setItem('pixelInteractions', JSON.stringify(interactions));
+    renderPosts(document.getElementById('main-search-bar').value); // Instantly update UI without hitting the server
 };
 
-window.toggleComments = (index) => {
-    const section = document.getElementById(`comment-section-${index}`);
+window.toggleComments = (postId) => {
+    const section = document.getElementById(`comment-section-${postId}`);
     section.style.display = section.style.display === 'none' ? 'block' : 'none';
 };
 
-window.addComment = (index) => {
-    const input = document.getElementById(`input-${index}`);
+window.addComment = (postId) => {
+    const input = document.getElementById(`input-${postId}`);
     const text = input.value.trim();
-    if (text) {
-        if (!localPosts[index].comments) localPosts[index].comments = [];
-        localPosts[index].comments.push({ user: getUsername(), text: text });
-        localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
-        loadPosts(document.getElementById('main-search-bar').value);
-    }
-};
+    if (!text) return;
 
-window.deletePost = function(index) {
-    if (!confirm("Are you sure you want to delete this post?")) return;
-    localPosts.splice(index, 1);
-    localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
-    loadPosts(document.getElementById('main-search-bar').value);
+    let interactions = JSON.parse(localStorage.getItem('pixelInteractions')) || {};
+    if (!interactions[postId]) interactions[postId] = { votes: {}, comments: [] };
+    
+    interactions[postId].comments.push({ user: getUsername(), text: text });
+    localStorage.setItem('pixelInteractions', JSON.stringify(interactions));
+    
+    renderPosts(document.getElementById('main-search-bar').value);
+    setTimeout(() => document.getElementById(`comment-section-${postId}`).style.display = 'block', 0);
 };
 
 // ==========================================
-// 10. POST SUBMISSION (Saved to Local Memory)
+// 11. POST DELETION LOGIC (Python DB)
+// ==========================================
+window.deletePost = async function(postId) {
+    if (!confirm("Are you sure you want to delete this post?")) return;
+    try {
+        const response = await fetchWithTimeout(`${API_URL}/posts/${postId}?user=${getUsername()}`, { method: 'DELETE' });
+        if (response.ok) {
+            loadPosts(); 
+        } else {
+            const err = await response.json();
+            alert("Error: " + err.error);
+        }
+    } catch (error) {
+        console.error("Delete failed:", error);
+        alert("Failed to communicate with server.");
+    }
+};
+
+// ==========================================
+// 12. POST SUBMISSION (Python DB)
 // ==========================================
 document.getElementById('submit-post-btn').addEventListener('click', async () => {
     const t = titleInput.value.trim();
@@ -382,23 +455,20 @@ document.getElementById('submit-post-btn').addEventListener('click', async () =>
     if(!t && !hasDrawn && !attachedFile && !driveLink) return;
 
     const submitBtn = document.getElementById('submit-post-btn');
-    submitBtn.textContent = "Processing...";
+    submitBtn.textContent = "Uploading Media...";
     submitBtn.disabled = true; 
 
     try {
         let finalMediaUrl = "";
 
         if (hasDrawn) {
-            submitBtn.textContent = "Uploading Art to Cloud...";
             finalMediaUrl = await uploadToImgBB(canvas.toDataURL("image/png"));
         } else if (attachedFile) {
             if (isRetro) {
                 submitBtn.textContent = "Applying Retro Filter...";
                 const pixelatedData = await pixelateImage(attachedFile, 10);
-                submitBtn.textContent = "Uploading Image...";
                 finalMediaUrl = await uploadToImgBB(pixelatedData);
             } else {
-                submitBtn.textContent = "Uploading Image...";
                 finalMediaUrl = await uploadToImgBB(attachedFile);
             }
         }
@@ -407,20 +477,24 @@ document.getElementById('submit-post-btn').addEventListener('click', async () =>
             b += `\n\n🔗 <a href="${driveLink}" target="_blank" style="color: #0079d3; font-weight: bold; text-decoration: none;">View Attached File</a>`;
         }
 
+        submitBtn.textContent = "Saving to Database...";
+
         const newPost = {
-            id: Date.now(),
             username: getUsername(), 
             title: t, 
             body: b,
             media: finalMediaUrl, 
-            date: new Date().toLocaleDateString(),
-            votes: 1,
-            comments: []
+            date: new Date().toLocaleDateString()
         };
 
-        // Save to Local Storage instead of Python Server
-        localPosts.unshift(newPost);
-        localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
+        const response = await fetchWithTimeout(`${API_URL}/posts`, {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify(newPost),
+            timeout: 15000 
+        });
+        
+        if (!response.ok) throw new Error("Server rejected the post");
         
         // Reset Everything
         localStorage.removeItem('pixelDraft');
