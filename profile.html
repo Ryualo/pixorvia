@@ -117,7 +117,6 @@
             document.getElementById('edit-profile-btn').style.display = 'block';
         }
 
-        // --- TIMEOUT CONTROLLER ---
         async function fetchWithTimeout(resource, options = {}) {
             const { timeout = 12000 } = options; 
             const controller = new AbortController();
@@ -127,35 +126,44 @@
             return response;
         }
 
-        // --- 1. FETCH PROFILE DATA ---
         async function loadProfile() {
             document.getElementById('displayName').textContent = targetUser;
             document.getElementById('displayHandle').textContent = '@' + targetUser.toLowerCase();
+
+            // CHECK LOCAL STORAGE FIRST
+            const localAvatar = localStorage.getItem(`avatar_${targetUser}`);
+            const localBio = localStorage.getItem(`bio_${targetUser}`);
+            const localBanner = localStorage.getItem(`banner_${targetUser}`);
+
+            if (localAvatar) {
+                document.getElementById('profile-avatar-display').style.backgroundImage = `url(${localAvatar})`;
+                document.getElementById('profile-default-icon').style.display = 'none';
+            }
+            if (localBio) document.getElementById('displayBio').textContent = localBio;
+            if (localBanner) document.getElementById('profile-banner').style.backgroundImage = `url(${localBanner})`;
 
             try {
                 const res = await fetchWithTimeout(`${API_URL}/users/${targetUser}`);
                 if (res.ok) {
                     const data = await res.json();
-                    document.getElementById('displayBio').textContent = data.bio || "No bio provided.";
-                    if (data.background) document.getElementById('profile-banner').style.backgroundImage = `url(${data.background})`;
-                    if (data.avatar) {
+                    if (!localBio) document.getElementById('displayBio').textContent = data.bio || "No bio provided.";
+                    if (!localBanner && data.background) document.getElementById('profile-banner').style.backgroundImage = `url(${data.background})`;
+                    if (!localAvatar && data.avatar) {
                         document.getElementById('profile-avatar-display').style.backgroundImage = `url(${data.avatar})`;
                         document.getElementById('profile-default-icon').style.display = 'none';
                     }
-                } else {
+                } else if (!localBio) {
                     document.getElementById('displayBio').textContent = "User hasn't set up their profile yet.";
                 }
             } catch (e) {
-                document.getElementById('displayBio').textContent = e.name === 'AbortError' ? "Server is heavily loaded (Tarpit)." : "Error loading profile data.";
+                if(!localBio) document.getElementById('displayBio').textContent = e.name === 'AbortError' ? "Server is heavily loaded (Tarpit)." : "Error loading profile data.";
             }
         }
 
-        // --- 2. FETCH GALLERY DATA ---
         async function loadGallery() {
             const galleryContainer = document.getElementById('gallery-container');
             const emptyStateMsg = document.getElementById('empty-state-msg');
             
-            // 🔥 THE NEW BUILT-IN SPINNER 🔥
             emptyStateMsg.style.display = 'block';
             emptyStateMsg.innerHTML = `
                 <i class="fas fa-circle-notch fa-spin" style="font-size: 35px; color: #0079d3; margin-bottom: 15px;"></i>
@@ -165,7 +173,6 @@
             try {
                 const res = await fetchWithTimeout(`${API_URL}/posts`);
                 const allPosts = await res.json();
-                
                 const myPosts = allPosts.filter(p => p.username === targetUser);
                 
                 document.getElementById('post-count-val').textContent = myPosts.length;
