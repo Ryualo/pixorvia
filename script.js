@@ -1,7 +1,6 @@
 // ==========================================
 // 1. CONFIGURATION & AUTHENTICATION
 // ==========================================
-const API_URL = 'https://ryualz.pythonanywhere.com/api';
 const IMGBB_API_KEY = 'd0c91137ced695243206c17f75dd6f0a'; 
 const ADMIN_NAME = 'Ryual'; 
 
@@ -11,19 +10,7 @@ if (!localStorage.getItem('customName')) {
 const getUsername = () => localStorage.getItem('customName');
 
 // ==========================================
-// 2. NETWORK TIMEOUT CONTROLLER
-// ==========================================
-async function fetchWithTimeout(resource, options = {}) {
-    const { timeout = 12000 } = options;
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeout);
-    const response = await fetch(resource, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return response;
-}
-
-// ==========================================
-// 3. IMAGE PROCESSING & CLOUD UPLOADS
+// 2. IMAGE PROCESSING & CLOUD UPLOADS
 // ==========================================
 async function pixelateImage(base64Str, pixelSize = 10) {
     return new Promise((resolve) => {
@@ -63,7 +50,7 @@ async function uploadToImgBB(base64Image) {
 }
 
 // ==========================================
-// 4. UI ELEMENTS & STATE VARIABLES
+// 3. UI ELEMENTS & STATE VARIABLES
 // ==========================================
 const createModal = document.getElementById('create-post-modal');
 const studioModal = document.getElementById('canvas-modal');
@@ -78,7 +65,7 @@ let attachedFile = null;
 let hasDrawn = false;
 
 // ==========================================
-// 5. DRAFT & MODAL MANAGEMENT
+// 4. DRAFT & MODAL MANAGEMENT
 // ==========================================
 document.getElementById('open-create-modal').addEventListener('click', () => {
     createModal.style.display = 'flex';
@@ -120,14 +107,8 @@ document.getElementById('close-create-modal').addEventListener('click', () => {
     createModal.style.display = 'none';
 });
 
-window.addEventListener('beforeunload', (e) => {
-    if (createModal.style.display === 'flex' && hasUnsavedChanges()) {
-        e.preventDefault(); e.returnValue = ''; 
-    }
-});
-
 // ==========================================
-// 6. PIXEL STUDIO CONTROLS & ZOOM
+// 5. PIXEL STUDIO CONTROLS & ZOOM
 // ==========================================
 document.getElementById('open-canvas-btn').addEventListener('click', () => studioModal.style.display = 'flex');
 document.getElementById('close-studio-btn').addEventListener('click', () => studioModal.style.display = 'none');
@@ -148,41 +129,13 @@ document.getElementById('zoom-out-btn').addEventListener('click', () => {
     if (currentScale > 0.5) { currentScale -= 0.5; canvas.style.transform = `scale(${currentScale})`; zoomLevelDisplay.textContent = `${Math.round(currentScale * 100)}%`; }
 });
 
-// ==========================================
-// ACCESSIBILITY: ARROW KEY PANNING
-// ==========================================
-const canvasViewport = document.querySelector('.canvas-viewport');
-window.addEventListener('keydown', (e) => {
-    if (studioModal.style.display === 'flex') {
-        const panSpeed = 30; // Speed of movement per arrow press
-        switch(e.key) {
-            case 'ArrowUp':
-                canvasViewport.scrollTop -= panSpeed;
-                e.preventDefault();
-                break;
-            case 'ArrowDown':
-                canvasViewport.scrollTop += panSpeed;
-                e.preventDefault();
-                break;
-            case 'ArrowLeft':
-                canvasViewport.scrollLeft -= panSpeed;
-                e.preventDefault();
-                break;
-            case 'ArrowRight':
-                canvasViewport.scrollLeft += panSpeed;
-                e.preventDefault();
-                break;
-        }
-    }
-});
-
 document.getElementById('clear-canvas-btn').addEventListener('click', () => { 
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height); 
     hasDrawn = false; previewBox.style.display = 'none';
 });
 
 // ==========================================
-// 7. ADVANCED CANVAS LOGIC (Flood Fill & Shapes)
+// 6. ADVANCED CANVAS LOGIC (Flood Fill & Shapes)
 // ==========================================
 let isDrawing = false;
 ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
@@ -280,7 +233,7 @@ function drawPixel(e) {
 }
 
 // ==========================================
-// 8. MEDIA ATTACHMENT
+// 7. MEDIA ATTACHMENT
 // ==========================================
 document.getElementById('file-upload').addEventListener('change', (e) => {
     if(e.target.files[0]) {
@@ -296,99 +249,129 @@ document.getElementById('file-upload').addEventListener('change', (e) => {
 });
 
 // ==========================================
-// 9. FEED LOADING & SEARCH (With Admin Logic)
+// 8. FEED LOADING & SEARCH (Using Local Memory)
 // ==========================================
+let localPosts = JSON.parse(localStorage.getItem('pixelPosts')) || [
+    {
+        id: 1,
+        username: "PixelMaster",
+        title: "Welcome to PixelFeed!",
+        body: "Draw something in the studio and share it below.",
+        media: "",
+        date: "Today",
+        votes: 42,
+        comments: []
+    }
+];
+
 const searchBar = document.getElementById('main-search-bar');
 searchBar.addEventListener('input', (e) => loadPosts(e.target.value));
 
-async function loadPosts(searchQuery = "") {
+function loadPosts(searchQuery = "") {
     const wrapper = document.getElementById('posts-wrapper');
-    wrapper.innerHTML = `
-        <div style="text-align: center; padding: 50px;">
-            <i class="fas fa-circle-notch fa-spin" style="font-size: 35px; color: #0079d3; margin-bottom: 15px;"></i>
-            <p style="color: var(--secondary-text); font-weight: bold; font-size: 14px;">Waking up the server...</p>
-        </div>
-    `; 
+    const query = searchQuery.toLowerCase();
     
-    try {
-        const response = await fetchWithTimeout(`${API_URL}/posts`, { timeout: 15000 });
-        if (!response.ok) throw new Error("Server error");
-        const posts = await response.json();
+    const filteredPosts = localPosts.filter(post => {
+        return (post.title || '').toLowerCase().includes(query) || 
+               (post.body || '').toLowerCase().includes(query) || 
+               (post.username || '').toLowerCase().includes(query);
+    });
+
+    wrapper.innerHTML = ''; 
+
+    if (filteredPosts.length === 0) {
+        wrapper.innerHTML = `<p style="text-align:center; color: var(--secondary-text); padding: 20px;">No posts found.</p>`;
+        return;
+    }
+    
+    filteredPosts.forEach((post, index) => {
+        const isOwner = post.username === getUsername();
+        const isAdminPoster = post.username === ADMIN_NAME; 
+        const iAmAdmin = getUsername() === ADMIN_NAME; 
+
+        const el = document.createElement('article');
+        el.className = 'post';
         
-        const query = searchQuery.toLowerCase();
-        const filteredPosts = posts.filter(post => {
-            return (post.title || '').toLowerCase().includes(query) || 
-                   (post.body || '').toLowerCase().includes(query) || 
-                   (post.username || '').toLowerCase().includes(query);
-        });
-
-        wrapper.innerHTML = ''; 
-
-        if (filteredPosts.length === 0) {
-            wrapper.innerHTML = `<p style="text-align:center; color: var(--secondary-text); padding: 20px;">No posts found.</p>`;
-            return;
-        }
+        const mediaHtml = post.media ? `<img src="${post.media}" class="post-image-main" style="max-width: 100%; border-radius: 8px; margin-top: 10px;">` : '';
+        const badgeHtml = isAdminPoster ? `<span class="admin-badge"><i class="fas fa-crown"></i> Admin</span>` : '';
+        const deleteHtml = (isOwner || iAmAdmin) ? `<button class="delete-btn" onclick="deletePost(${index})" style="background:none; border:none; color:#ff4757; cursor:pointer;"><i class="fas fa-trash"></i></button>` : '';
         
-        filteredPosts.reverse().forEach(post => {
-            const isOwner = post.username === getUsername();
-            const isAdminPoster = post.username === ADMIN_NAME; 
-            const iAmAdmin = getUsername() === ADMIN_NAME; 
-
-            const el = document.createElement('article');
-            el.className = 'post';
-            
-            const mediaHtml = post.media ? `<img src="${post.media}" class="post-image-main">` : '';
-            const badgeHtml = isAdminPoster ? `<span class="admin-badge"><i class="fas fa-crown"></i> Admin</span>` : '';
-            const deleteHtml = (isOwner || iAmAdmin) ? `<button class="delete-btn" onclick="deletePost(${post.id})"><i class="fas fa-trash"></i></button>` : '';
-            
-            el.innerHTML = `
-                <div class="vote-sidebar"><button class="vote-btn">▲</button><span class="score">${post.votes || 1}</span><button class="vote-btn">▼</button></div>
-                <div class="post-content">
-                    <div class="post-header">
+        el.innerHTML = `
+            <div style="display: flex; gap: 15px;">
+                <div class="vote-sidebar" style="display:flex; flex-direction:column; align-items:center;">
+                    <button onclick="handleVote(${index}, 1)" style="background:none; border:none; color:var(--secondary-text); cursor:pointer; font-size: 18px;">▲</button>
+                    <span class="score" style="font-weight:bold; margin: 5px 0;">${post.votes || 1}</span>
+                    <button onclick="handleVote(${index}, -1)" style="background:none; border:none; color:var(--secondary-text); cursor:pointer; font-size: 18px;">▼</button>
+                </div>
+                <div class="post-content" style="flex:1;">
+                    <div class="post-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
                         <div style="display:flex; align-items:center; gap:8px;">
-                            <a href="profile.html?user=${post.username}" class="username-display">@${post.username}</a>
+                            <a href="profile.html?user=${post.username}" class="username-display" style="font-weight:bold; color: #0079d3; text-decoration:none;">@${post.username}</a>
                             ${badgeHtml}
                             <span style="font-size:11px; color:#888;">• ${post.date}</span>
                         </div>
                         ${deleteHtml}
                     </div>
-                    <h2 class="post-title">${post.title}</h2>
-                    <p class="post-body">${post.body.replace(/\n/g, '<br>')}</p>
+                    <h2 class="post-title" style="margin: 0 0 10px 0;">${post.title}</h2>
+                    <p class="post-body" style="margin: 0;">${post.body.replace(/\n/g, '<br>')}</p>
                     ${mediaHtml}
+
+                    <div style="margin-top: 15px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                        <button onclick="toggleComments(${index})" style="background:none; border:none; color:var(--secondary-text); cursor:pointer; font-weight:bold;">
+                            <i class="fas fa-comment"></i> ${post.comments ? post.comments.length : 0} Comments
+                        </button>
+                        
+                        <div id="comment-section-${index}" style="display:none; margin-top: 15px;">
+                            <div id="comment-list-${index}" style="margin-bottom: 10px;">
+                                ${(post.comments || []).map(c => `<div style="font-size: 13px; margin-bottom: 8px; padding: 8px; background: rgba(0,0,0,0.03); border-radius: 4px;"><strong>@${c.user}:</strong> ${c.text}</div>`).join('')}
+                            </div>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="text" id="input-${index}" placeholder="Write a comment..." style="flex:1; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                <button onclick="addComment(${index})" style="padding: 8px 15px; background: #0079d3; color: white; border: none; border-radius: 4px; cursor:pointer;">Post</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            `;
-            wrapper.appendChild(el); 
-        });
-    } catch (error) {
-        if (error.name === 'AbortError') {
-            wrapper.innerHTML = '<p style="text-align:center; color: #ff4757; padding: 20px;"><i class="fas fa-snail"></i> The server is taking too long to respond. Please wait a minute and refresh.</p>';
-        } else {
-            wrapper.innerHTML = '<p style="text-align:center; color: #ff4757; padding: 20px;">Failed to connect to the server.</p>';
-        }
-    }
+            </div>
+        `;
+        wrapper.appendChild(el); 
+    });
 }
 
 // ==========================================
-// 10. POST DELETION LOGIC
+// 9. NEW INTERACTIVE FEATURES (Votes & Comments)
 // ==========================================
-window.deletePost = async function(postId) {
-    if (!confirm("Are you sure you want to delete this post?")) return;
-    try {
-        const response = await fetchWithTimeout(`${API_URL}/posts/${postId}?user=${getUsername()}`, { method: 'DELETE' });
-        if (response.ok) {
-            loadPosts(document.getElementById('main-search-bar').value); 
-        } else {
-            const err = await response.json();
-            alert("Error: " + err.error);
-        }
-    } catch (error) {
-        console.error("Delete failed:", error);
-        alert("Failed to communicate with server.");
+window.handleVote = (index, change) => {
+    localPosts[index].votes = (localPosts[index].votes || 1) + change;
+    localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
+    loadPosts(document.getElementById('main-search-bar').value);
+};
+
+window.toggleComments = (index) => {
+    const section = document.getElementById(`comment-section-${index}`);
+    section.style.display = section.style.display === 'none' ? 'block' : 'none';
+};
+
+window.addComment = (index) => {
+    const input = document.getElementById(`input-${index}`);
+    const text = input.value.trim();
+    if (text) {
+        if (!localPosts[index].comments) localPosts[index].comments = [];
+        localPosts[index].comments.push({ user: getUsername(), text: text });
+        localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
+        loadPosts(document.getElementById('main-search-bar').value);
     }
 };
 
+window.deletePost = function(index) {
+    if (!confirm("Are you sure you want to delete this post?")) return;
+    localPosts.splice(index, 1);
+    localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
+    loadPosts(document.getElementById('main-search-bar').value);
+};
+
 // ==========================================
-// 11. POST SUBMISSION (Final Payload)
+// 10. POST SUBMISSION (Saved to Local Memory)
 // ==========================================
 document.getElementById('submit-post-btn').addEventListener('click', async () => {
     const t = titleInput.value.trim();
@@ -399,20 +382,23 @@ document.getElementById('submit-post-btn').addEventListener('click', async () =>
     if(!t && !hasDrawn && !attachedFile && !driveLink) return;
 
     const submitBtn = document.getElementById('submit-post-btn');
-    submitBtn.textContent = "Uploading Media...";
+    submitBtn.textContent = "Processing...";
     submitBtn.disabled = true; 
 
     try {
         let finalMediaUrl = "";
 
         if (hasDrawn) {
+            submitBtn.textContent = "Uploading Art to Cloud...";
             finalMediaUrl = await uploadToImgBB(canvas.toDataURL("image/png"));
         } else if (attachedFile) {
             if (isRetro) {
                 submitBtn.textContent = "Applying Retro Filter...";
                 const pixelatedData = await pixelateImage(attachedFile, 10);
+                submitBtn.textContent = "Uploading Image...";
                 finalMediaUrl = await uploadToImgBB(pixelatedData);
             } else {
+                submitBtn.textContent = "Uploading Image...";
                 finalMediaUrl = await uploadToImgBB(attachedFile);
             }
         }
@@ -421,24 +407,20 @@ document.getElementById('submit-post-btn').addEventListener('click', async () =>
             b += `\n\n🔗 <a href="${driveLink}" target="_blank" style="color: #0079d3; font-weight: bold; text-decoration: none;">View Attached File</a>`;
         }
 
-        submitBtn.textContent = "Saving to Database...";
-
         const newPost = {
+            id: Date.now(),
             username: getUsername(), 
             title: t, 
             body: b,
             media: finalMediaUrl, 
-            date: new Date().toLocaleDateString()
+            date: new Date().toLocaleDateString(),
+            votes: 1,
+            comments: []
         };
 
-        const response = await fetchWithTimeout(`${API_URL}/posts`, {
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify(newPost),
-            timeout: 15000 
-        });
-        
-        if (!response.ok) throw new Error("Server rejected the post");
+        // Save to Local Storage instead of Python Server
+        localPosts.unshift(newPost);
+        localStorage.setItem('pixelPosts', JSON.stringify(localPosts));
         
         // Reset Everything
         localStorage.removeItem('pixelDraft');
