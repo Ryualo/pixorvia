@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PixelFeed - Home</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    
+    <script>
+        if (localStorage.getItem('appTheme') === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+        if (!localStorage.getItem('customName')) {
+            window.location.href = 'login.html';
+        }
+    </script>
+</head>
+<body>
+
+    <header>
+        <div class="header-left">
+            <a href="index.html" class="logo"><i class="fas fa-cube" style="margin-right: 8px;"></i>PixelFeed</a>
+        </div>
+        <div class="header-center">
+            <input type="text" id="main-search-bar" class="search-bar" placeholder="Search PixelFeed...">
+        </div>
+        <div class="header-right">
+            <a href="chat.html" class="nav-link"><i class="fas fa-comments"></i> Chat</a>
+            <a href="profile.html" class="nav-link"><i class="fas fa-user-astronaut"></i> Profile</a>
+            <a href="settings.html" class="nav-link"><i class="fas fa-cog"></i> Settings</a>
+        </div>
+    </header>
+
+    <main class="feed-container">
+        <div class="create-post-trigger" id="open-create-modal">
+            <div class="trigger-avatar"><i class="fas fa-user-astronaut"></i></div>
+            <div class="trigger-input">Create Post or Pixel Art...</div>
+            <i class="fas fa-image" style="color: var(--secondary-text); font-size: 20px;"></i>
+        </div>
+
+        <div id="posts-wrapper">
+            <div style="text-align: center; padding: 50px;">
+                <i class="fas fa-circle-notch fa-spin" style="font-size: 35px; color: #0079d3; margin-bottom: 15px;"></i>
+                <p style="color: var(--secondary-text); font-weight: bold; font-size: 14px;">Waking up the server...</p>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal-overlay" id="create-post-modal">
+        <div class="create-modal-content">
+            <div class="modal-header-clean">
+                <h2 style="font-size: 18px; margin: 0;">Create a post</h2>
+                <button class="icon-btn" id="close-create-modal"><i class="fas fa-times"></i></button>
+            </div>
+            
+            <input type="text" id="post-title-input" placeholder="Title">
+            <textarea id="post-body-input" placeholder="Text (optional)"></textarea>
+            
+            <div class="drive-link-box">
+                <i class="fas fa-link" style="color: var(--secondary-text);"></i>
+                <input type="text" id="drive-link-input" placeholder="Attach Google Drive or external link...">
+            </div>
+
+            <div class="retro-toggle-box" id="retro-toggle-box" style="display: none;">
+                <label class="switch">
+                    <input type="checkbox" id="retro-mode-toggle" checked>
+                    <span class="slider"></span>
+                </label>
+                <span style="font-size: 13px; font-weight: bold; color: var(--text-color);">
+                    <i class="fas fa-magic" style="margin-right: 5px; color: #ff4757;"></i> Retro Pixel Filter
+                </span>
+            </div>
+            
+            <div id="draft-media-preview" style="display:none; background: var(--hover-bg); padding: 10px; border-radius: 6px; border: 1px dashed var(--border-color); text-align: center; margin-top: 10px;">
+                <i class="fas fa-file-image" style="color: #0079d3; font-size: 24px; margin-bottom: 5px;"></i>
+                <div id="file-name-display" style="font-size: 14px; color: var(--text-color); font-weight: bold;">Art attached</div>
+            </div>
+
+            <div class="post-actions-row">
+                <div class="tools-left">
+                    <button class="icon-btn" id="open-canvas-btn" title="Open Pixel Studio"><i class="fas fa-palette"></i></button>
+                    <label for="file-upload" class="icon-btn" title="Upload Image" style="margin: 0; display: inline-flex; align-items: center; cursor: pointer;"><i class="fas fa-upload"></i></label>
+                    <input type="file" id="file-upload" accept="image/*" style="display:none">
+                </div>
+                <button class="post-btn" id="submit-post-btn">Post</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="canvas-modal" style="z-index: 2000;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span><i class="fas fa-paint-brush" style="margin-right: 8px;"></i>Pixel Studio</span>
+                <button class="close-modal" id="close-studio-btn">&times;</button>
+            </div>
+            
+            <div class="canvas-tools">
+                <select id="paint-mode-select">
+                    <option value="draw">Draw</option>
+                    <option value="fill">Fill (Bucket)</option>
+                    <option value="erase">Eraser</option>
+                </select>
+                <select id="pixel-shape-select">
+                    <option value="square">Square</option>
+                    <option value="circle">Circle</option>
+                    <option value="triangle">Triangle</option>
+                </select>
+                <input type="color" id="color-picker" value="#000000" style="width: 40px; height: 30px; padding: 0;">
+                <select id="grid-size-select">
+                    <option value="16">16x16</option>
+                    <option value="32" selected>32x32</option>
+                    <option value="64">64x64</option>
+                </select>
+                
+                <div class="zoom-controls">
+                    <button id="zoom-out-btn"><i class="fas fa-search-minus"></i></button>
+                    <span class="zoom-level" id="zoom-level-display">100%</span>
+                    <button id="zoom-in-btn"><i class="fas fa-search-plus"></i></button>
+                </div>
+                
+                <button id="clear-canvas-btn" style="color: #ff4757; border-color: #ff4757;"><i class="fas fa-trash"></i></button>
+            </div>
+
+            <div class="canvas-viewport">
+                <canvas id="pixel-canvas" width="384" height="384"></canvas>
+            </div>
+            
+            <button class="post-btn" id="done-drawing-btn" style="width: 100%; padding: 12px; font-size: 16px;">Attach Art to Post</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
