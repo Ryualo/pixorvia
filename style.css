@@ -1,0 +1,554 @@
+/* =========================================
+   1. CORE VARIABLES & THEME
+   ========================================= */
+:root {
+    --bg-color: #dae0e6;
+    --container-bg: #ffffff;
+    --text-color: #1c1c1c;
+    --secondary-text: #7c7c7c;
+    --border-color: #cccccc;
+    --hover-bg: #f6f7f8;
+    --input-bg: #f6f7f8;
+    --accent-blue: #0079d3;
+}
+
+[data-theme='dark'] {
+    --bg-color: #030303;
+    --container-bg: #1a1a1b;
+    --text-color: #d7dadc;
+    --secondary-text: #818384;
+    --border-color: #343536;
+    --hover-bg: #272729;
+    --input-bg: #272729;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    padding-top: 60px; 
+}
+
+/* =========================================
+   2. FIXED HEADER - THREE ZONE LAYOUT
+   ========================================= */
+header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    background: var(--container-bg);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    z-index: 1000;
+}
+
+.header-left {
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+
+.logo {
+    color: var(--accent-blue);
+    text-decoration: none;
+    font-weight: bold;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+}
+
+.header-center {
+    flex: 2;
+    display: flex;
+    justify-content: center;
+}
+
+.search-bar {
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 8px 16px;
+    border-radius: 20px;
+    width: 100%;
+    max-width: 400px;
+    outline: none;
+}
+
+.header-right {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 20px;
+}
+
+.nav-link {
+    color: var(--text-color);
+    text-decoration: none;
+    font-size: 18px;
+    transition: color 0.2s;
+}
+
+.nav-link:hover {
+    color: var(--accent-blue);
+}
+
+/* =========================================
+   3. MAIN FEED & POST CREATOR
+   ========================================= */
+.feed-container {
+    max-width: 600px;
+    margin: 20px auto;
+}
+
+.create-post-trigger {
+    background: var(--container-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 10px;
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    cursor: pointer;
+}
+
+.trigger-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--hover-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 10px;
+}
+
+.trigger-input {
+    flex-grow: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    padding: 10px;
+    border-radius: 4px;
+    color: var(--secondary-text);
+    margin-right: 10px;
+}
+
+/* =========================================
+   4. POSTS & TEXT WRAP FIXES
+   ========================================= */
+.post {
+    background: var(--container-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    margin-bottom: 15px;
+    display: flex;
+    overflow: hidden; 
+}
+
+.vote-sidebar {
+    background: var(--hover-bg);
+    width: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+}
+
+.vote-btn {
+    background: none;
+    border: none;
+    color: var(--secondary-text);
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.score {
+    font-weight: bold;
+    margin: 5px 0;
+}
+
+.post-content {
+    padding: 10px 15px;
+    flex-grow: 1;
+    min-width: 0;
+}
+
+.post-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.post-title {
+    font-size: 18px;
+    margin-bottom: 5px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.post-body {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.4;
+}
+
+.post-image-main {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin-top: 10px;
+    border: 1px solid var(--border-color);
+    display: block;
+    background-color: var(--hover-bg);
+}
+
+/* =========================================
+   5. ADMIN BADGE & DELETE BUTTON
+   ========================================= */
+.admin-badge {
+    background: linear-gradient(45deg, #0079d3, #00a2ff);
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 3px 8px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    box-shadow: 0 0 10px rgba(0, 121, 211, 0.4);
+}
+
+.username-display {
+    font-weight: bold;
+    color: var(--text-color);
+    text-decoration: none;
+}
+
+.username-display:hover {
+    text-decoration: underline;
+}
+
+.delete-btn {
+    background: transparent;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 8px;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    border-radius: 50%;
+}
+
+.delete-btn:hover {
+    color: #ff4757;
+    background: rgba(255, 71, 87, 0.1);
+    transform: scale(1.1);
+}
+
+/* =========================================
+   6. MODALS & STUDIO CONTROLS
+   ========================================= */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.create-modal-content, .modal-content {
+    background: var(--container-bg);
+    width: 550px;
+    max-width: 95%;
+    max-height: 95vh;
+    overflow-y: auto;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.modal-header-clean, .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 15px;
+    margin-bottom: 15px;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.close-modal, #close-create-modal {
+    background: none;
+    border: none;
+    color: var(--secondary-text);
+    font-size: 24px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.close-modal:hover, #close-create-modal:hover {
+    color: #ff4757;
+}
+
+.canvas-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 15px;
+    align-items: center;
+    background: var(--hover-bg);
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.canvas-tools select {
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    background: var(--input-bg);
+    color: var(--text-color);
+    cursor: pointer;
+    width: auto;
+    margin-bottom: 0;
+}
+
+#color-picker {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 2px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    background: none;
+}
+
+#color-picker::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+#color-picker::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
+}
+
+.zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--input-bg);
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+}
+
+.zoom-controls button {
+    background: none;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 16px;
+    transition: 0.2s;
+}
+
+.zoom-controls button:hover {
+    color: var(--accent-blue);
+    transform: scale(1.2);
+}
+
+.zoom-level {
+    font-weight: bold;
+    font-size: 13px;
+    min-width: 45px;
+    text-align: center;
+}
+
+#clear-canvas-btn {
+    background: transparent;
+    border: 1px solid #ff4757;
+    color: #ff4757;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: 0.2s;
+    margin-left: auto;
+}
+
+#clear-canvas-btn:hover {
+    background: #ff4757;
+    color: white;
+}
+
+/* =========================================
+   7. THE CANVAS ITSELF
+   ========================================= */
+.canvas-viewport {
+    width: 100%;
+    height: 384px;
+    max-height: 50vh;
+    overflow: auto;
+    display: block;
+    background: #1e1e1e;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    margin-bottom: 15px;
+}
+
+#pixel-canvas {
+    background: white;
+    cursor: crosshair;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    transform-origin: top left;
+    display: block;
+    margin: 0 auto;
+}
+
+/* Modal Form Inputs */
+input[type="text"], textarea {
+    width: 100%;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    outline: none;
+}
+
+textarea {
+    height: 100px;
+    resize: vertical;
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    color: var(--secondary-text);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 5px 10px;
+}
+
+.icon-btn:hover {
+    color: var(--accent-blue);
+}
+
+.post-btn {
+    background: var(--accent-blue);
+    color: white;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.post-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* =========================================
+   8. RETRO SWITCH & DRIVE LINK
+   ========================================= */
+.drive-link-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--input-bg);
+    padding: 5px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    margin-bottom: 10px;
+}
+
+.drive-link-box input {
+    margin-bottom: 0;
+    border: none;
+    padding: 5px;
+}
+
+.retro-toggle-box {
+    display: flex;
+    align-items: center;
+    padding: 10px;
+    background: var(--hover-bg);
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    margin-right: 10px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: var(--accent-blue);
+}
+
+input:checked + .slider:before {
+    transform: translateX(16px);
+}
+
+/* =========================================
+   9. SETTINGS & PROFILE PAGE SPACING
+   ========================================= */
+.settings-container, .profile-container {
+    max-width: 600px;
+    margin: 40px auto;
+    width: 100%;
+    padding: 0 15px;
+}
