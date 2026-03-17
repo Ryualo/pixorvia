@@ -73,7 +73,7 @@
             font-weight: bold;
         }
 
-        /* Profile Specifics (From your screenshot) */
+        /* Profile Specifics */
         .cover-photo-area {
             height: 150px;
             background: #2a2a2a;
@@ -147,6 +147,9 @@
             <button class="settings-tab active" onclick="switchTab('profile')"><i class="fas fa-user-edit" style="width: 25px;"></i> Edit Profile</button>
             <button class="settings-tab" onclick="switchTab('account')"><i class="fas fa-shield-alt" style="width: 25px;"></i> Account & Security</button>
             <button class="settings-tab" onclick="switchTab('preferences')"><i class="fas fa-sliders-h" style="width: 25px;"></i> Preferences</button>
+            
+            <hr style="border: none; border-top: 1px solid var(--border-color); margin: 10px 20px;">
+            <button class="settings-tab" onclick="logoutUser()" style="color: #ff4757;"><i class="fas fa-sign-out-alt" style="width: 25px;"></i> Log Out</button>
         </aside>
 
         <div class="settings-content-area">
@@ -241,11 +244,9 @@
         
         // 2. Tab Switching Logic
         function switchTab(tabId) {
-            // Remove active classes from all tabs and sections
             document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.settings-section').forEach(s => s.classList.remove('active'));
             
-            // Add active class to clicked tab and corresponding section
             event.currentTarget.classList.add('active');
             document.getElementById('tab-' + tabId).classList.add('active');
         }
@@ -256,7 +257,6 @@
             btn.textContent = "Saving...";
             btn.disabled = true;
             
-            // Fake network delay for professional feel
             setTimeout(() => {
                 btn.textContent = "Save Profile Changes";
                 btn.disabled = false;
@@ -280,6 +280,17 @@
                 localStorage.setItem('appTheme', 'light');
             }
         });
+
+        // 5. Logout Logic
+        function logoutUser() {
+            if(confirm("Are you sure you want to log out?")) {
+                // Destroy the JWT token and username from local storage
+                localStorage.removeItem('pixelToken');
+                localStorage.removeItem('customName');
+                // Kick back to login
+                window.location.href = 'login.html';
+            }
+        }
     </script>
 </body>
 </html>
