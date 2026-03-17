@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile - PixelFeed</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <script>
+        if (localStorage.getItem('appTheme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        if (!localStorage.getItem('customName')) window.location.href = 'login.html';
+    </script>
+    <style>
+        .app-layout { display: flex; flex-direction: column; align-items: center; max-width: 1000px; margin: 20px auto; padding: 0 20px; width: 100%; }
+        .profile-card { background: var(--container-bg); border: 1px solid var(--border-color); border-radius: 8px; width: 100%; margin-bottom: 30px; position: relative; overflow: hidden; display: block; padding: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .profile-banner-bg { position: absolute; top: 0; left: 0; width: 100%; height: 150px; background-color: var(--hover-bg); background-size: cover; background-position: center; z-index: 0; border-bottom: 1px solid var(--border-color); }
+        .profile-content-wrapper { position: relative; z-index: 1; display: flex; gap: 30px; align-items: flex-start; padding: 30px; margin-top: 100px; flex-wrap: wrap; }
+        .profile-avatar { width: 120px; height: 120px; background-color: var(--container-bg); border: 4px solid var(--container-bg); border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 50px; flex-shrink: 0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); background-size: cover; background-position: center; margin-top: -20px; }
+        .profile-info { flex-grow: 1; min-width: 250px; margin-top: 10px; }
+        .profile-name { font-size: 26px; font-weight: bold; margin-bottom: 4px; color: var(--text-color); }
+        .profile-handle { color: var(--secondary-text); font-size: 15px; margin-bottom: 15px; }
+        .profile-bio { font-size: 15px; line-height: 1.5; color: var(--text-color); margin-bottom: 20px; max-width: 500px; }
+        .profile-stats { display: flex; gap: 20px; }
+        .stat { display: flex; gap: 5px; font-size: 15px; }
+        .stat-val { font-weight: bold; color: var(--text-color); }
+        .stat-label { color: var(--secondary-text); }
+        .edit-btn { padding: 8px 16px; background: var(--container-bg); color: #0079d3; border: 1px solid #0079d3; border-radius: 20px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; height: fit-content; margin-top: 10px; display: none; }
+        .edit-btn:hover { background: var(--hover-bg); }
+        .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; width: 100%; }
+        .art-thumbnail { background: var(--container-bg); border-radius: 6px; overflow: hidden; border: 1px solid var(--border-color); cursor: pointer; transition: 0.2s; display: flex; flex-direction: column; }
+        .art-thumbnail:hover { border-color: var(--secondary-text); transform: translateY(-3px); box-shadow: 0 4px 12px rgba(0,0,0,0.1);}
+        .art-image { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; image-rendering: pixelated; }
+        .art-thumbnail-title { padding: 12px; font-size: 14px; font-weight: bold; color: var(--text-color); text-align: center; border-top: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .empty-state { text-align: center; color: var(--secondary-text); font-size: 16px; padding: 40px; grid-column: 1 / -1; background: var(--container-bg); border: 1px solid var(--border-color); border-radius: 6px; }
+
+        .post-viewer-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 3000; justify-content: center; align-items: center; padding: 40px; }
+        .post-viewer-content { background: var(--container-bg); border-radius: 8px; display: flex; flex-direction: row; width: 100%; max-width: 1000px; height: 80vh; overflow: hidden; border: 1px solid var(--border-color); }
+        .viewer-image-container { width: 65%; display: flex; justify-content: center; align-items: center; border-right: 1px solid var(--border-color); background: var(--hover-bg); }
+        .viewer-image { width: 100%; max-height: 100%; object-fit: contain; image-rendering: pixelated;}
+        .viewer-details-box { width: 35%; padding: 30px; display: flex; flex-direction: column; background: var(--container-bg); position: relative; overflow-y: auto; }
+        .viewer-title { font-size: 22px; font-weight: bold; margin-bottom: 8px; color: var(--text-color); }
+        .viewer-meta { color: var(--secondary-text); font-size: 13px; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color);}
+        .viewer-body { font-size: 15px; line-height: 1.6; color: var(--text-color); white-space: pre-wrap;}
+        .viewer-close { position: absolute; top: 15px; right: 20px; font-size: 28px; color: var(--secondary-text); cursor: pointer; border: none; background: none; transition: 0.2s;}
+        .viewer-close:hover { color: #ff4757; }
+        @media (max-width: 768px) { .post-viewer-content { flex-direction: column; height: 90vh; } .viewer-image-container { width: 100%; height: 50%; border-right: none; border-bottom: 1px solid var(--border-color); } .viewer-details-box { width: 100%; height: 50%; } }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-left">
+            <a href="index.html" class="logo"><i class="fas fa-cube" style="margin-right: 8px;"></i>PixelFeed</a>
+        </div>
+        <div class="header-center">
+            <input type="text" class="search-bar" placeholder="Search disabled on profile" disabled>
+        </div>
+        <div class="header-right">
+            <a href="chat.html" class="nav-link" title="Global Chat"><i class="fas fa-comments"></i> Chat</a>
+            <a href="profile.html" class="nav-link" style="color: #0079d3;" title="Profile"><i class="fas fa-user-astronaut"></i> Profile</a>
+            <a href="settings.html" class="nav-link" title="Settings"><i class="fas fa-cog"></i> Settings</a>
+        </div>
+    </header>
+
+    <div class="app-layout">
+        
+        <div class="profile-card">
+            <div class="profile-banner-bg" id="profile-banner"></div>
+            
+            <div class="profile-content-wrapper">
+                <div class="profile-avatar" id="profile-avatar-display">
+                    <i class="fas fa-user-astronaut" id="profile-default-icon" style="color: var(--secondary-text);"></i>
+                </div>
+                
+                <div class="profile-info">
+                    <h1 class="profile-name" id="displayName">Loading...</h1>
+                    <div class="profile-handle" id="displayHandle">@loading</div>
+                    <p class="profile-bio" id="displayBio">Loading profile data...</p>
+                    
+                    <div class="profile-stats">
+                        <div class="stat"><span class="stat-val" id="post-count-val">0</span> <span class="stat-label">Posts</span></div>
+                    </div>
+                </div>
+                
+                <button class="edit-btn" id="edit-profile-btn" onclick="window.location.href='settings.html'">Edit Profile</button>
+            </div>
+        </div>
+
+        <main class="gallery-grid" id="gallery-container">
+            <div class="empty-state" id="empty-state-msg">
+                </div>
+        </main>
+    </div>
+
+    <div class="post-viewer-overlay" id="post-viewer">
+        <div class="post-viewer-content">
+            <div class="viewer-image-container" id="viewer-img-container">
+                <img id="viewer-img" class="viewer-image" src="" alt="Art">
+            </div>
+            <div class="viewer-details-box">
+                <button class="viewer-close" id="close-viewer">×</button>
+                <h3 class="viewer-title" id="viewer-title"></h3>
+                <div class="viewer-meta" id="viewer-meta"></div>
+                <p class="viewer-body" id="viewer-text"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://ryualz.pythonanywhere.com/api';
+        const loggedInUser = localStorage.getItem('customName');
+        
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetUser = urlParams.get('user') || loggedInUser;
+
+        if (targetUser === loggedInUser) {
+            document.getElementById('edit-profile-btn').style.display = 'block';
+        }
+
+        // --- TIMEOUT CONTROLLER ---
+        async function fetchWithTimeout(resource, options = {}) {
+            const { timeout = 12000 } = options; 
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), timeout);
+            const response = await fetch(resource, { ...options, signal: controller.signal });
+            clearTimeout(id);
+            return response;
+        }
+
+        // --- 1. FETCH PROFILE DATA ---
+        async function loadProfile() {
+            document.getElementById('displayName').textContent = targetUser;
+            document.getElementById('displayHandle').textContent = '@' + targetUser.toLowerCase();
+
+            try {
+                const res = await fetchWithTimeout(`${API_URL}/users/${targetUser}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('displayBio').textContent = data.bio || "No bio provided.";
+                    if (data.background) document.getElementById('profile-banner').style.backgroundImage = `url(${data.background})`;
+                    if (data.avatar) {
+                        document.getElementById('profile-avatar-display').style.backgroundImage = `url(${data.avatar})`;
+                        document.getElementById('profile-default-icon').style.display = 'none';
+                    }
+                } else {
+                    document.getElementById('displayBio').textContent = "User hasn't set up their profile yet.";
+                }
+            } catch (e) {
+                document.getElementById('displayBio').textContent = e.name === 'AbortError' ? "Server is heavily loaded (Tarpit)." : "Error loading profile data.";
+            }
+        }
+
+        // --- 2. FETCH GALLERY DATA ---
+        async function loadGallery() {
+            const galleryContainer = document.getElementById('gallery-container');
+            const emptyStateMsg = document.getElementById('empty-state-msg');
+            
+            // 🔥 THE NEW BUILT-IN SPINNER 🔥
+            emptyStateMsg.style.display = 'block';
+            emptyStateMsg.innerHTML = `
+                <i class="fas fa-circle-notch fa-spin" style="font-size: 35px; color: #0079d3; margin-bottom: 15px;"></i>
+                <p style="color: var(--secondary-text); font-weight: bold; font-size: 14px;">Waking up the server...</p>
+            `;
+            
+            try {
+                const res = await fetchWithTimeout(`${API_URL}/posts`);
+                const allPosts = await res.json();
+                
+                const myPosts = allPosts.filter(p => p.username === targetUser);
+                
+                document.getElementById('post-count-val').textContent = myPosts.length;
+
+                if (myPosts.length > 0) {
+                    emptyStateMsg.style.display = 'none';
+                    
+                    myPosts.forEach(post => {
+                        const card = document.createElement('div');
+                        card.className = 'art-thumbnail';
+                        
+                        let mediaHtml = post.media 
+                            ? `<img src="${post.media}" class="art-image" alt="Artwork">` 
+                            : `<div class="art-image" style="background: var(--input-bg); display: flex; justify-content: center; align-items: center; padding: 20px; text-align: center; font-size: 14px; color: var(--text-color);">${post.body ? post.body.substring(0, 50) + '...' : 'Text Post'}</div>`;
+
+                        card.innerHTML = `
+                            ${mediaHtml}
+                            <div class="art-thumbnail-title">${post.title || 'Untitled'}</div>
+                        `;
+                        
+                        card.onclick = () => {
+                            const imgTag = document.getElementById('viewer-img');
+                            if (post.media) {
+                                imgTag.src = post.media;
+                                imgTag.style.display = 'block';
+                            } else {
+                                imgTag.style.display = 'none';
+                            }
+                            
+                            document.getElementById('viewer-title').textContent = post.title || 'Untitled Art';
+                            document.getElementById('viewer-text').textContent = post.body || 'No description provided.';
+                            document.getElementById('viewer-meta').textContent = `Posted on ${post.date}`;
+                            document.getElementById('post-viewer').style.display = 'flex';
+                        };
+                        
+                        galleryContainer.appendChild(card);
+                    });
+                } else {
+                    emptyStateMsg.innerHTML = targetUser === loggedInUser ? "Your gallery is empty! Head to the feed to create some art." : "This user hasn't posted anything yet.";
+                }
+            } catch (e) {
+                emptyStateMsg.innerHTML = e.name === 'AbortError' ? "Server is heavily loaded (Tarpit). Please wait and refresh." : "Error loading gallery from server.";
+            }
+        }
+
+        document.getElementById('close-viewer').onclick = () => document.getElementById('post-viewer').style.display = 'none';
+        document.getElementById('post-viewer').addEventListener('click', (e) => {
+            if (e.target.id === 'post-viewer') document.getElementById('post-viewer').style.display = 'none';
+        });
+
+        loadProfile();
+        loadGallery();
+    </script>
+</body>
+</html>
