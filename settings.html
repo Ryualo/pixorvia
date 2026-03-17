@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PixelFeed - Settings & Profile</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    
+    <script>
+        if (localStorage.getItem('appTheme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+        if (!localStorage.getItem('customName')) window.location.href = 'login.html';
+    </script>
+
+    <style>
+        .settings-layout {
+            display: flex;
+            max-width: 900px;
+            margin: 40px auto;
+            gap: 20px;
+            padding: 0 20px;
+        }
+
+        /* Sidebar Navigation */
+        .settings-sidebar {
+            width: 250px;
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 0;
+            height: fit-content;
+        }
+
+        .settings-tab {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 15px 20px;
+            background: none;
+            border: none;
+            color: var(--text-color);
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+            border-left: 3px solid transparent;
+        }
+
+        .settings-tab:hover { background: var(--hover-bg); }
+        .settings-tab.active {
+            background: var(--hover-bg);
+            border-left: 3px solid var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        /* Main Content Area */
+        .settings-content-area {
+            flex-grow: 1;
+            background: var(--container-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .settings-section { display: none; }
+        .settings-section.active { display: block; }
+
+        .settings-header-banner {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        /* Profile Specifics (From your screenshot) */
+        .cover-photo-area {
+            height: 150px;
+            background: #2a2a2a;
+            position: relative;
+            border-bottom: 1px solid var(--border-color);
+            background-image: linear-gradient(45deg, #1a1a1b, #333);
+        }
+
+        .edit-cover-btn {
+            position: absolute; top: 15px; right: 15px;
+            background: rgba(0,0,0,0.6); color: white;
+            border: none; padding: 8px 15px; border-radius: 20px;
+            cursor: pointer; font-weight: bold; font-size: 12px;
+        }
+
+        .avatar-wrapper {
+            width: 100px; height: 100px;
+            background: var(--hover-bg);
+            border: 4px solid var(--container-bg);
+            border-radius: 50%;
+            position: absolute; bottom: -50px; left: 20px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px; color: var(--secondary-text);
+        }
+
+        .form-grid { padding: 70px 20px 20px 20px; }
+        
+        .form-group { margin-bottom: 20px; }
+        .form-group label {
+            display: block; font-size: 12px; font-weight: bold;
+            color: var(--secondary-text); margin-bottom: 8px; text-transform: uppercase;
+        }
+        
+        .form-group input:disabled { background: var(--bg-color); cursor: not-allowed; }
+
+        .danger-zone {
+            border: 1px solid #ff4757;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px;
+            background: rgba(255, 71, 87, 0.05);
+        }
+
+        /* Toast Notification */
+        #toast {
+            position: fixed; bottom: -50px; left: 50%; transform: translateX(-50%);
+            background: var(--accent-blue); color: white;
+            padding: 12px 24px; border-radius: 30px; font-weight: bold;
+            transition: bottom 0.3s; z-index: 3000; box-shadow: 0 5px 15px rgba(0,121,211,0.4);
+        }
+        #toast.show { bottom: 30px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-left">
+            <a href="index.html" class="logo"><i class="fas fa-cube" style="margin-right: 8px;"></i>PixelFeed</a>
+        </div>
+        <div class="header-center"></div> 
+        <div class="header-right">
+            <a href="chat.html" class="nav-link"><i class="fas fa-comments"></i></a>
+            <a href="profile.html" class="nav-link"><i class="fas fa-user-astronaut"></i></a>
+            <a href="settings.html" class="nav-link" style="color: var(--accent-blue);"><i class="fas fa-cog"></i></a>
+        </div>
+    </header>
+
+    <main class="settings-layout">
+        
+        <aside class="settings-sidebar">
+            <button class="settings-tab active" onclick="switchTab('profile')"><i class="fas fa-user-edit" style="width: 25px;"></i> Edit Profile</button>
+            <button class="settings-tab" onclick="switchTab('account')"><i class="fas fa-shield-alt" style="width: 25px;"></i> Account & Security</button>
+            <button class="settings-tab" onclick="switchTab('preferences')"><i class="fas fa-sliders-h" style="width: 25px;"></i> Preferences</button>
+        </aside>
+
+        <div class="settings-content-area">
+            
+            <div id="tab-profile" class="settings-section active">
+                <div class="settings-header-banner">Edit Profile</div>
+                
+                <div class="cover-photo-area">
+                    <button class="edit-cover-btn"><i class="fas fa-camera"></i> Edit Cover</button>
+                    <div class="avatar-wrapper"><i class="fas fa-user-astronaut"></i></div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>USERNAME (CANNOT BE CHANGED)</label>
+                        <input type="text" id="settings-username" disabled>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>DISPLAY NAME</label>
+                        <input type="text" placeholder="e.g., Pixel Master">
+                    </div>
+
+                    <div class="form-group">
+                        <label>ABOUT ME (BIO)</label>
+                        <textarea id="settings-bio" placeholder="Tell people what you are studying or building..."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>PORTFOLIO / GITHUB LINK</label>
+                        <input type="text" placeholder="https://github.com/yourname">
+                    </div>
+
+                    <button class="post-btn" onclick="saveSettings()" style="width: 100%; margin-top: 10px;">Save Profile Changes</button>
+                </div>
+            </div>
+
+            <div id="tab-account" class="settings-section">
+                <div class="settings-header-banner">Account & Security</div>
+                <div class="form-grid" style="padding-top: 20px;">
+                    <div class="form-group">
+                        <label>EMAIL ADDRESS</label>
+                        <input type="text" placeholder="your.email@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>CHANGE PASSWORD</label>
+                        <input type="password" placeholder="New Password">
+                        <input type="password" placeholder="Confirm Password" style="margin-top: 10px;">
+                    </div>
+                    
+                    <div class="danger-zone">
+                        <h3 style="color: #ff4757; margin-bottom: 10px;">Danger Zone</h3>
+                        <p style="font-size: 13px; color: var(--secondary-text); margin-bottom: 15px;">Once you delete your account, there is no going back. Please be certain.</p>
+                        <button style="background: #ff4757; color: white; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer;">Delete Account</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-preferences" class="settings-section">
+                <div class="settings-header-banner">App Preferences</div>
+                <div class="form-grid" style="padding-top: 20px;">
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid var(--border-color);">
+                        <div>
+                            <div style="font-weight: bold;">Dark Mode</div>
+                            <div style="font-size: 12px; color: var(--secondary-text);">Switch between light and dark themes.</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="theme-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                        <div>
+                            <div style="font-weight: bold;">Auto-Play Pixel Animations</div>
+                            <div style="font-size: 12px; color: var(--secondary-text);">Play GIFs and animations automatically in feed.</div>
+                        </div>
+                        <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <div id="toast"><i class="fas fa-check-circle"></i> Settings Saved!</div>
+
+    <script>
+        // 1. Load User Data
+        document.getElementById('settings-username').value = localStorage.getItem('customName') || 'Guest';
+        
+        // 2. Tab Switching Logic
+        function switchTab(tabId) {
+            // Remove active classes from all tabs and sections
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.settings-section').forEach(s => s.classList.remove('active'));
+            
+            // Add active class to clicked tab and corresponding section
+            event.currentTarget.classList.add('active');
+            document.getElementById('tab-' + tabId).classList.add('active');
+        }
+
+        // 3. Save Button Animation (Toast)
+        function saveSettings() {
+            const btn = event.currentTarget;
+            btn.textContent = "Saving...";
+            btn.disabled = true;
+            
+            // Fake network delay for professional feel
+            setTimeout(() => {
+                btn.textContent = "Save Profile Changes";
+                btn.disabled = false;
+                
+                const toast = document.getElementById('toast');
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 3000);
+            }, 800);
+        }
+
+        // 4. Theme Engine Logic
+        const themeToggle = document.getElementById('theme-toggle');
+        if (localStorage.getItem('appTheme') === 'dark') themeToggle.checked = true;
+        
+        themeToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                localStorage.setItem('appTheme', 'dark');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+                localStorage.setItem('appTheme', 'light');
+            }
+        });
+    </script>
+</body>
+</html>
