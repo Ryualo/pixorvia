@@ -20,6 +20,7 @@
         .auth-btn:hover { background: #005a9e; }
         .auth-footer { text-align: center; margin-top: 20px; color: var(--secondary-text); font-size: 14px; }
         .auth-footer a { color: #0079d3; text-decoration: none; font-weight: bold; }
+        .sandbox-warning { background: rgba(255, 165, 2, 0.1); border: 1px solid #ffa502; color: #ffa502; padding: 10px; border-radius: 4px; font-size: 12px; text-align: center; margin-bottom: 15px; }
     </style>
 </head>
 <body>
@@ -48,12 +49,21 @@
         </div>
 
         <div id="step-2" style="display: none;">
-            <p style="text-align: center; color: var(--secondary-text); font-size: 14px; margin-bottom: 20px;">We sent a 6-digit code to your email. Enter it below to activate your account!</p>
+            <p style="text-align: center; color: var(--text-color); font-size: 14px; margin-bottom: 10px;">We sent a 6-digit code to <strong id="display-email" style="color: #0079d3;"></strong>.</p>
+            
+            <div class="sandbox-warning">
+                <i class="fas fa-exclamation-triangle"></i> <strong>Testing Mode Active:</strong> Ensure you used your registered Resend admin email and check your <strong>Spam/Junk folder</strong>!
+            </div>
+
             <div class="input-group">
                 <label>Verification Code</label>
                 <input type="text" id="verify-code" placeholder="000000" style="letter-spacing: 5px; text-align: center; font-size: 18px; font-weight: bold;">
             </div>
             <button class="auth-btn" id="verify-btn">Verify & Enter Pixorvia</button>
+            
+            <div style="text-align: center; margin-top: 15px;">
+                <a href="#" id="go-back-btn" style="color: var(--secondary-text); font-size: 13px; text-decoration: none;"><i class="fas fa-arrow-left"></i> Wrong email? Go back</a>
+            </div>
         </div>
         
         <div class="auth-footer">
@@ -66,6 +76,7 @@
         
         const sendCodeBtn = document.getElementById('send-code-btn');
         const verifyBtn = document.getElementById('verify-btn');
+        const goBackBtn = document.getElementById('go-back-btn');
         const errorMsg = document.getElementById('error-message');
         const successMsg = document.getElementById('success-message');
 
@@ -102,6 +113,7 @@
 
                 if (res.ok) {
                     showMessage("Code sent! Check your inbox.");
+                    document.getElementById('display-email').textContent = email; // Update UI to show where it went
                     document.getElementById('step-1').style.display = 'none';
                     document.getElementById('step-2').style.display = 'block';
                     document.getElementById('form-title').textContent = "Verify Your Email";
@@ -150,6 +162,18 @@
                 verifyBtn.textContent = "Verify & Enter Pixorvia";
                 verifyBtn.disabled = false;
             }
+        });
+
+        // GO BACK BUTTON
+        goBackBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            document.getElementById('step-2').style.display = 'none';
+            document.getElementById('step-1').style.display = 'block';
+            document.getElementById('form-title').textContent = "Create a new account";
+            sendCodeBtn.textContent = "Create Account";
+            sendCodeBtn.disabled = false;
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
         });
     </script>
 </body>
