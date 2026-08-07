@@ -1,0 +1,1 @@
+if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/PixorGrid/sw.js', { scope: '/PixorGrid/' })})}
