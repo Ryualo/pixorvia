@@ -65,6 +65,5 @@ export default defineConfig({
       }
     })
   ],
-  // Set base for GitHub Pages - change 'PixorGrid' to match your repo name
-  base: '/PixorGrid/',
+  base: '/',
 })
