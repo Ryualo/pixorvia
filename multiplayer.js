@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {RemotePlayer} from './remote-player.js';
+import {NetworkWorld} from './network-world.js';
 
 const MAX = 4, SEND = 1 / 20, WIPE_DELAY = 2.5, TIMEOUT = 10000, ID_RETRIES = 5;
 const PEER_SRC = ['https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js', 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'];
@@ -38,6 +39,7 @@ export class Multiplayer {
     this.name = ''; this.room = ''; this.alive = true; this.spectating = false; this.follow = null;
     this.sendT = 0; this.wipeT = 0; this.seed = null;
     this.sess = 0; this.timer = 0; // sess invalidates callbacks from torn-down peers
+    this.share = new NetworkWorld(g); // ONE authoritative monster/world state per session
     this.ui();
     addEventListener('beforeunload', () => this.peer?.destroy());
   }
@@ -88,6 +90,7 @@ export class Multiplayer {
       if (s !== this.sess) return;
       this.disarm(); this.room = id;
       this.coop = true; this.isHost = true; this.alive = true;
+      this.share.attach(); this.share.host = true; // host runs the only monster AI
       this.seed = newSeed(); this.g.level = -1; this.g.newLevel(this.seed);
       this.status(`ROOM ID: ${id} — SHARE IT WITH UP TO ${MAX - 1} FRIENDS`);
       $('lb-enter').style.display = 'inline-block'; this.roster();
@@ -164,6 +167,7 @@ export class Multiplayer {
     this.disarm(); this.sess++;
     const wasDead = !this.alive;
     this.coop = false; this.isHost = false; this.spectating = false; this.follow = null; this.alive = true;
+    this.share.detach();
     for (const id of [...this.remotes.keys()]) this.removeRemote(id);
     this.conns.clear(); this.hostConn = null; this.peer?.destroy(); this.peer = null;
     this.lockButtons(false); this.status(msg); $('mp-hud').style.display = 'none';
@@ -209,6 +213,14 @@ export class Multiplayer {
           break;
         case 'player-death': case 'player-alive':
           this.setAlive(id, d.t === 'player-alive'); this.broadcast({t: d.t, id}, conn); break;
+        case 'monster-state': // clients never author these; drop anything they claim
+          break;
+        case 'world-event': // clients request, the host decides
+          if (d.e === 'escape') this.escape();
+          // a client ran out of battery: the blackout is a shared world event,
+          // so the host re-applies it for itself and relays it to everyone else
+          else if (d.e === 'power') this.share.world('power');
+          break;
         case 'escape': this.escape(); break;
       }
       return;
@@ -217,6 +229,7 @@ export class Multiplayer {
       case 'welcome':
         if (this.coop) break;
         this.disarm(); this.coop = true; this.alive = true;
+    this.share.attach(); this.share.host = false;
         for (const p of d.players || []) this.addRemote(p.id, p.name, p.alive !== false);
         this.startLevel(d.seed, d.level);
         this.status(`CONNECTED TO ROOM ${this.room}`); $('lb-enter').style.display = 'inline-block';
@@ -226,6 +239,7 @@ export class Multiplayer {
       case 's': if (finite(d)) this.remotes.get(d.id)?.push(d); break;
       case 'player-death': case 'player-alive': this.setAlive(d.id, d.t === 'player-alive'); break;
       case 'escape': if (Number.isInteger(d.seed) && Number.isInteger(d.level)) this.startLevel(d.seed, d.level); break;
+      case 'monster-state': case 'world-event': this.share.receive(d); break;
       case 'full': this.fail(`CONNECTION FAILED: ROOM FULL (${MAX}/${MAX})`); break;
     }
   }
@@ -233,9 +247,9 @@ export class Multiplayer {
   // ---------- game events ----------
   // whole team moves to a new, identically-seeded level (host authoritative)
   escape() {
-    if (!this.isHost) return this.emit({t: 'escape'});
+    if (!this.isHost) return this.emit({t: 'world-event', e: 'escape'});
     const seed = newSeed(), level = this.g.level + 1;
-    this.broadcast({t: 'escape', seed, level});
+    this.share.world('level', {seed, level});
     this.startLevel(seed, level);
   }
   startLevel(seed, level) {
