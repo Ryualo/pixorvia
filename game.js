@@ -993,7 +993,17 @@ class Game{
     this.goo=new GooTrail(this.scene);this.audio=new Audio(this);this.lighting=new Lighting(this.scene);this.player=new Player(this);this.flash=new Flashlight(this);this.monster=new Monster(this);
     this.newLevel();
     const start=$('start'),c=this.player.controls;
-    start.addEventListener('click',()=>{this.audio.init();c.lock()});
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+      start.style.display = 'none';
+      const startMobile = () => {
+        this.audio.init();
+        c.isLocked = true;
+        document.removeEventListener('touchstart', startMobile);
+      };
+      document.addEventListener('touchstart', startMobile);
+    } else {
+      start.addEventListener('click', () => { this.audio.init(); c.lock(); });
+    }
     c.addEventListener('lock',()=>start.classList.add('hidden'));c.addEventListener('unlock',()=>{if(!this.dead)start.classList.remove('hidden')});
     this.coords=$('coords');this.status=$('status');this.clockEl=$('clock');this.track=$('track');
     addEventListener('resize',()=>this.resize());this.clock=new THREE.Clock();this.acc=0;this.renderer.setAnimationLoop(()=>this.loop());
