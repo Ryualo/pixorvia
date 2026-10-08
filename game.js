@@ -302,7 +302,41 @@ class Player{
     addEventListener('mousedown',e=>{if(e.button===0&&this.controls.isLocked&&!g.dead&&e.target.tagName==='CANVAS')g.cameraBlast()});
     addEventListener('keydown',e=>{if(e.code==='KeyC'&&!e.repeat&&this.controls.isLocked&&!g.dead)g.cameraBlast()});
     addEventListener('keyup',e=>this.keys[e.code]=false);addEventListener('blur',()=>this.keys={});
+    // --- MOBILE TOUCH CONTROLS ---
+    const bindBtn = (id, code) => {
+      const btn = $(id);
+      if(!btn) return;
+      btn.addEventListener('touchstart', e => { e.preventDefault(); this.keys[code] = true; });
+      btn.addEventListener('touchend', e => { e.preventDefault(); this.keys[code] = false; });
+    };
+    bindBtn('btn-w', 'KeyW'); bindBtn('btn-a', 'KeyA'); bindBtn('btn-s', 'KeyS'); bindBtn('btn-d', 'KeyD'); 
+    bindBtn('btn-shift', 'ShiftLeft'); bindBtn('btn-e', 'KeyE');
+    
+    $('btn-f')?.addEventListener('touchstart', e => { e.preventDefault(); g.flash.toggle(); });
+    $('btn-c')?.addEventListener('touchstart', e => { e.preventDefault(); g.cameraBlast(); });
+
+    // Touch Look Camera
+    let tX, tY;
+    document.addEventListener('touchstart', e => {
+      if(e.touches.length === 1 && e.target.tagName === 'CANVAS') { 
+        tX = e.touches[0].pageX; tY = e.touches[0].pageY; 
+      }
+    }, {passive: false});
+    document.addEventListener('touchmove', e => {
+      if(e.touches.length === 1 && e.target.tagName === 'CANVAS') {
+        e.preventDefault();
+        const dx = e.touches[0].pageX - tX, dy = e.touches[0].pageY - tY;
+        tX = e.touches[0].pageX; tY = e.touches[0].pageY;
+        
+        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        euler.setFromQuaternion(g.camera.quaternion);
+        euler.y -= dx * 0.005; euler.x -= dy * 0.005;
+        euler.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, euler.x));
+        g.camera.quaternion.setFromEuler(euler);
+      }
+    }, {passive: false});
   }
+  
   get running(){return (this.keys.ShiftLeft||this.keys.ShiftRight)&&!this.keys.KeyE} // winding disables sprint
   get winding(){return!!this.keys.KeyE}
   update(dt){
@@ -963,6 +997,10 @@ class Game{
     c.addEventListener('lock',()=>start.classList.add('hidden'));c.addEventListener('unlock',()=>{if(!this.dead)start.classList.remove('hidden')});
     this.coords=$('coords');this.status=$('status');this.clockEl=$('clock');this.track=$('track');
     addEventListener('resize',()=>this.resize());this.clock=new THREE.Clock();this.acc=0;this.renderer.setAnimationLoop(()=>this.loop());
+    $('fullscreen-btn')?.addEventListener('click', () => {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    });
   }
   newLevel(){
     this.level++;this.world?.dispose();this.goo.clear();
