@@ -50,6 +50,15 @@ canvas{display:block}
 @keyframes shift{50%{transform:translateX(6px) skewX(2deg);filter:hue-rotate(20deg) saturate(1.6)}}
 @keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-3%,2%)}66%{transform:translate(2%,-3%)}100%{transform:translate(-2%,-1%)}}
 @keyframes blink{50%{opacity:.15}}
+#mobile-ui { display: none; }
+@media (pointer: coarse) {
+  #mobile-ui { display: block; position: fixed; inset: 0; z-index: 999; pointer-events: none; }
+  #fullscreen-btn { position: absolute; top: 15px; left: 15px; pointer-events: auto; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #aaa; padding: 10px; border-radius: 5px; font-family: monospace; }
+  #joystick-left { position: absolute; bottom: 30px; left: 20px; display: grid; grid-template-areas: ". w ." "a s d"; gap: 8px; pointer-events: auto; }
+  #action-right { position: absolute; bottom: 30px; right: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; pointer-events: auto; }
+  #mobile-ui button { width: 55px; height: 55px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; font-size: 12px; backdrop-filter: blur(4px); user-select: none; }
+  #btn-w { grid-area: w; } #btn-a { grid-area: a; } #btn-s { grid-area: s; } #btn-d { grid-area: d; }
+}
 </style>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
 </head>
@@ -71,7 +80,21 @@ canvas{display:block}
 <div id="jumpscare"><div class="face"><div class="head"></div><div class="eye e1"></div><div class="eye e2"></div><div class="mouth"></div></div></div>
 <div id="flash"></div><div id="dark"></div>
 <div id="vhs"><div class="scan"></div><div class="vig"></div><div class="grain"></div><div class="track" id="track"></div></div>
-
+<div id="mobile-ui">
+  <button id="fullscreen-btn">⛶ FULLSCREEN</button>
+  <div id="joystick-left">
+    <button id="btn-w">W</button>
+    <button id="btn-a">A</button>
+    <button id="btn-s">S</button>
+    <button id="btn-d">D</button>
+  </div>
+  <div id="action-right">
+    <button id="btn-c">CAM</button>
+    <button id="btn-f">FLASH</button>
+    <button id="btn-e">WIND</button>
+    <button id="btn-shift">RUN</button>
+  </div>
+</div>
 <script type="module" src="game.js"></script>
 </body>
 </html>
