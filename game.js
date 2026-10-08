@@ -1018,6 +1018,9 @@ class Game{
     this.level=-1;this.dead=false;this.dark=false;this.camCD=0;this.sayT=0;this.recT=0;this.distT=rnd(20,40);this.trackY=-10;
     this.goo=new GooTrail(this.scene);this.audio=new Audio(this);this.lighting=new Lighting(this.scene);this.player=new Player(this);this.flash=new Flashlight(this);this.monster=new Monster(this);
     this.newLevel();this.mp=new Multiplayer(this);
+    // ONE authoritative world state: reuse the instance Multiplayer already
+    // wired to the network instead of creating a second, dead copy.
+    this.share=this.mp.share;
     const start=$('start'),c=this.player.controls;
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
       start.style.display = 'none';
@@ -1059,22 +1062,32 @@ class Game{
     this.monster.onFlash();
   }
   // battery at 0%: lights die, dynamo dies, eyes come for you
-  blackout(){
+  // `remote` = a peer's battery died; this machine is only applying the event,
+  // so it must not re-broadcast it (no loops) and must not touch its monster.
+  blackout(remote){
     if(this.dark||this.dead)return;this.dark=true;
+    // a real, shared world event: everybody's lights die, not just mine
+    if(!remote&&this.share?.on)this.share.world('power');
     this.audio.click();this.audio.powerDown();
     for(const l of this.lighting.pool)l.intensity=0;this.lighting.setDark(true);
     this.scene.background.set(0);this.scene.fog.color.set(0);
     this.flash.spot.intensity=0;this.flash.fill.intensity=0;
     $('dark').style.opacity=.35;
     this.warn('POWER FAILURE — RUN',2500);this.glitch();
-    this.monster.enterBloodlust();
+    // only the host's monster is real: a client leaves it to the snapshot
+    if(!remote||!this.share?.on||this.share.host)this.monster.enterBloodlust();
   }
   killPlayer(){
     if(this.dead)return;
-    this.dead=true;this.player.controls.unlock();this.monster.active=false;this.monster.group.visible=false;
+    this.dead=true;this.player.controls.unlock();
+    // shared world: only the host's copy of the monster is the real one, so a
+    // client does not get to hide/stop it — it just stops being a hunter here.
+    // the network layer also stops drawing the mirrored body for dead peers.
+    if(!this.share?.on||this.share.host){this.monster.active=false;this.monster.group.visible=false}
+    else this.share.hide();
     const j=$('jumpscare');j.classList.remove('active');void j.offsetWidth;j.classList.add('active');
     this.audio.jumpIntro();this.audio.killScream();this.glitch();this.warn('YOU WERE FOUND',2000);
-    if(this.mp.coop)this.mp.die();
+    if(this.mp.coop){this.mp.die();this.onPlayerDeath(this.mp.peer?.id||'local')}
     setTimeout(()=>{j.classList.remove('active');if(!this.dead)return;if(this.mp.coop)this.mp.spectate();else this.respawn()},2000);
   }
   respawn(seed){
@@ -1082,9 +1095,40 @@ class Game{
   }
   update(dt){
     if(this.dead)return;
-    this.player.update(dt);this.flash.update(dt);this.monster.update(dt);this.lighting.update(dt,this.camera.position,this.monster);this.audio.update(dt);
+    this.player.update(dt);this.flash.update(dt);
+    // ONE authoritative world: in co-op only the host runs the monster AI.
+    // a client's body is driven by the host snapshot in NetworkWorld.update().
+    if(!this.share?.on||this.share.host)this.monster.update(dt);
+    this.lighting.update(dt,this.camera.position,this.monster);this.audio.update(dt);
     if(!this.dark)this.audio.setStress(this.lighting.maxStress);
     if(this.player.controls.isLocked&&(this.distT-=dt)<=0&&!this.dark){this.audio.distant();this.distT=rnd(25,60)}
+  }
+  /* ==================================================================
+     NETWORK WORLD HOOKS
+     game.js keeps its own simulation; these two helpers are what the
+     network layer reads (host -> monsterEuler) and writes
+     (client -> monsterFace).  Nothing else about the AI changes.
+     ================================================================== */
+  // the monster's authoritative facing, in the same convention as Monster.animate
+  monsterEuler(m = this.monster) {
+    const c = this.camera.position;
+    const yaw = m.speed > .5 ? Math.atan2(m.dir.x, m.dir.z) : Math.atan2(c.x - m.pos.x, c.z - m.pos.z);
+    return {x: m.body ? m.body.rotation.x : 0, y: yaw};
+  }
+  // client side: rotate the mirrored body toward the host's reported heading
+  monsterFace(yaw, pitch, glide = yaw) {
+    const m = this.monster;
+    m.group.rotation.y = glide;
+    if (m.body) m.body.rotation.x = pitch;
+  }
+  // host side: the monster caught someone.  their own machine runs the
+  // jumpscare + spectate flow; the host only rebroadcasts the roster change.
+  onPlayerDeath(id) {
+    const mp = this.mp;
+    if (!mp?.coop || !mp.isHost || !id || id === mp.peer?.id) return;
+    if (id === 'local') return; // legacy client fallback, nobody to update
+    mp.setAlive(id, false);
+    mp.broadcast({t: 'player-death', id});
   }
   hud(dt){
     this.recT+=dt;const s=this.recT|0;this.clockEl.textContent=[s/3600|0,(s/60|0)%60,s%60].map(v=>String(v).padStart(2,'0')).join(':');
@@ -1099,7 +1143,15 @@ class Game{
     else this.status.textContent='AUDIO: LOW HUM';
     this.trackY=(this.trackY+dt*(60+(detected?240:0)))%(innerHeight+20);this.track.style.transform=`translateY(${this.trackY}px)`;
   }
-  loop(){const d=Math.min(this.clock.getDelta(),.1);this.acc=Math.min(this.acc+d,.25);while(this.acc>=CFG.STEP){this.update(CFG.STEP);this.acc-=CFG.STEP}this.mp.update(d);this.hud(d);this.renderer.render(this.scene,this.camera)}
+  loop(){
+    const d=Math.min(this.clock.getDelta(),.1);this.acc=Math.min(this.acc+d,.25);
+    while(this.acc>=CFG.STEP){this.update(CFG.STEP);this.acc-=CFG.STEP}
+    this.mp.update(d);
+    // ONE authoritative world: host samples its monster for clients, a client
+    // only mirrors the snapshot.  Both run inside this same loop.
+    if(this.share.on){if(this.share.host)this.share.tick(d);else this.share.update(d)}
+    this.hud(d);this.renderer.render(this.scene,this.camera);
+  }
   resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight)}
 }
 
