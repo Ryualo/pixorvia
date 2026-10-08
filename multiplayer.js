@@ -1,8 +1,30 @@
 import * as THREE from 'three';
 import {RemotePlayer} from './remote-player.js';
 
-const MAX = 4, SEND = 1 / 20, WIPE_DELAY = 2.5, PREFIX = 'bk0-lvl0-';
+const MAX = 4, SEND = 1 / 20, WIPE_DELAY = 2.5, TIMEOUT = 10000, ID_RETRIES = 5;
+const PEER_SRC = ['https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js', 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'];
+const ERR = {
+  'peer-unavailable': 'ROOM NOT FOUND — CHECK THE ROOM ID', 'unavailable-id': 'ROOM ID TAKEN',
+  network: 'CANNOT REACH SIGNALING SERVER', 'server-error': 'SIGNALING SERVER ERROR',
+  'socket-error': 'SIGNALING SOCKET ERROR', 'socket-closed': 'SIGNALING SOCKET CLOSED',
+  disconnected: 'NOT CONNECTED TO SIGNALING SERVER', webrtc: 'WEBRTC FAILED (NAT / FIREWALL)',
+  'browser-incompatible': 'BROWSER DOES NOT SUPPORT WEBRTC', 'ssl-unavailable': 'HTTPS REQUIRED',
+};
+const errText = e => 'CONNECTION FAILED: ' + (ERR[e?.type] || String(e?.type || 'UNKNOWN').toUpperCase()) + (e?.message ? ` (${e.message})` : '');
 const $ = id => document.getElementById(id);
+
+// make sure the PeerJS global exists before any multiplayer code touches it
+let peerLoad = null;
+const loadPeer = () => window.Peer ? Promise.resolve(window.Peer) : (peerLoad ||= new Promise((res, rej) => {
+  const next = i => {
+    if (i >= PEER_SRC.length) { peerLoad = null; return rej(new Error('PEERJS FAILED TO LOAD')) }
+    const s = document.createElement('script'); s.src = PEER_SRC[i];
+    s.onload = () => window.Peer ? res(window.Peer) : next(i + 1);
+    s.onerror = () => { s.remove(); next(i + 1) };
+    document.head.appendChild(s);
+  };
+  next(0);
+}));
 const E = new THREE.Euler(0, 0, 0, 'YXZ');
 const clean = s => String(s || '').replace(/[^\w \-.]/g, '').trim().slice(0, 14) || 'WANDERER';
 const newSeed = () => (Math.random() * 2 ** 32) >>> 0;
@@ -15,6 +37,7 @@ export class Multiplayer {
     this.conns = new Map(); this.remotes = new Map();
     this.name = ''; this.room = ''; this.alive = true; this.spectating = false; this.follow = null;
     this.sendT = 0; this.wipeT = 0; this.seed = null;
+    this.sess = 0; this.timer = 0; // sess invalidates callbacks from torn-down peers
     this.ui();
     addEventListener('beforeunload', () => this.peer?.destroy());
   }
@@ -43,48 +66,93 @@ export class Multiplayer {
   lockButtons(on) { for (const id of ['lb-host', 'lb-join']) $(id).disabled = on }
 
   // ---------- connection setup (star topology: host relays) ----------
-  hostGame() {
-    if (!window.Peer) return this.status('PEERJS FAILED TO LOAD');
-    this.name = clean($('lb-name').value); this.lockButtons(true); this.status('CREATING ROOM...');
-    this.room = code();
-    this.peer = new Peer(PREFIX + this.room);
-    this.peer.on('open', () => {
-      this.coop = true; this.isHost = true; this.alive = true;
-      this.seed = newSeed(); this.g.level = -1; this.g.newLevel(this.seed);
-      this.status(`ROOM ID: ${this.room} — SHARE IT WITH UP TO ${MAX - 1} FRIENDS`);
-      $('lb-enter').style.display = 'inline-block'; this.roster();
-    });
-    this.peer.on('connection', conn => {
-      conn.on('open', () => {
-        if (this.conns.size >= MAX - 1) { conn.send({t: 'full'}); setTimeout(() => conn.close(), 300); return }
-        this.conns.set(conn.peer, conn);
-      });
-      conn.on('data', d => this.receive(d, conn));
-      conn.on('close', () => this.dropClient(conn.peer));
-      conn.on('error', () => this.dropClient(conn.peer));
-    });
-    this.peer.on('error', e => {
-      if (e.type === 'unavailable-id') { this.peer.destroy(); return this.hostGame() }
-      this.status('NETWORK ERROR: ' + e.type); if (!this.coop) this.lockButtons(false);
-    });
+  arm() { this.disarm(); this.timer = setTimeout(() => this.fail('CONNECTION FAILED (TIMED OUT)'), TIMEOUT) }
+  disarm() { clearTimeout(this.timer); this.timer = 0 }
+  // abort a pending (or live) connection and show why
+  fail(msg) {
+    this.disarm();
+    if (this.coop) return this.endCoop(msg);
+    this.sess++;
+    this.hostConn?.close(); this.hostConn = null; this.peer?.destroy(); this.peer = null;
+    this.conns.clear(); this.isHost = false; this.lockButtons(false); this.status(msg);
   }
 
-  joinGame(raw) {
-    if (!window.Peer) return this.status('PEERJS FAILED TO LOAD');
-    const room = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (!room) return this.status('ENTER A ROOM ID');
-    this.name = clean($('lb-name').value); this.room = room; this.lockButtons(true); this.status('CONNECTING...');
-    this.peer = new Peer();
-    this.peer.on('open', () => {
-      const conn = this.hostConn = this.peer.connect(PREFIX + room, {reliable: true});
-      conn.on('open', () => conn.send({t: 'hello', name: this.name}));
-      conn.on('data', d => this.receive(d, conn));
-      conn.on('close', () => this.endCoop('HOST DISCONNECTED'));
+  async hostGame(tries = 0) {
+    this.name = clean($('lb-name').value); this.lockButtons(true); this.status('LOADING PEERJS...');
+    try { await loadPeer() } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET') }
+    const s = ++this.sess, room = code();
+    this.status('CREATING ROOM...');
+    const peer = this.peer = new Peer(room, {debug: 1}); // room ID == real PeerJS ID
+    this.arm();
+    peer.on('open', id => {
+      if (s !== this.sess) return;
+      this.disarm(); this.room = id;
+      this.coop = true; this.isHost = true; this.alive = true;
+      this.seed = newSeed(); this.g.level = -1; this.g.newLevel(this.seed);
+      this.status(`ROOM ID: ${id} — SHARE IT WITH UP TO ${MAX - 1} FRIENDS`);
+      $('lb-enter').style.display = 'inline-block'; this.roster();
     });
-    this.peer.on('error', e => {
-      this.status(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : 'NETWORK ERROR: ' + e.type);
-      if (this.coop) this.endCoop('CONNECTION LOST');
-      else { this.peer?.destroy(); this.peer = null; this.lockButtons(false) }
+    peer.on('connection', conn => this.acceptClient(conn, s));
+    peer.on('disconnected', () => {
+      if (s !== this.sess || peer.destroyed) return;
+      if (!this.coop) return this.fail(errText({type: 'disconnected'}));
+      // existing players stay connected P2P; reconnect so new players can still join
+      this.status(`ROOM ID: ${this.room} — SIGNALING LOST, RECONNECTING...`); peer.reconnect();
+    });
+    peer.on('close', () => { if (s === this.sess) this.fail('ROOM CLOSED') });
+    peer.on('error', e => {
+      if (s !== this.sess) return;
+      if (e.type === 'unavailable-id' && tries < ID_RETRIES) {
+        this.sess++; this.disarm(); peer.destroy(); this.peer = null;
+        return this.hostGame(tries + 1);
+      }
+      if (this.coop) { this.status(errText(e)); return } // room stays up for connected players
+      this.fail(errText(e));
+    });
+  }
+  acceptClient(conn, s) {
+    conn.on('open', () => {
+      if (s !== this.sess) return conn.close();
+      if (this.conns.size >= MAX - 1) { conn.send({t: 'full'}); setTimeout(() => conn.close(), 300); return }
+      this.conns.set(conn.peer, conn);
+    });
+    conn.on('data', d => { if (s === this.sess) this.receive(d, conn) });
+    conn.on('close', () => { if (s === this.sess) this.dropClient(conn.peer) });
+    conn.on('error', () => { if (s === this.sess) this.dropClient(conn.peer) });
+  }
+
+  async joinGame(raw) {
+    const room = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (room.length < 5 || room.length > 6) return this.status('ENTER THE 5–6 CHARACTER ROOM ID');
+    this.name = clean($('lb-name').value); this.room = room; this.lockButtons(true); this.status('LOADING PEERJS...');
+    try { await loadPeer() } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET') }
+    const s = ++this.sess;
+    this.status('CONNECTING TO SIGNALING SERVER...');
+    const peer = this.peer = new Peer({debug: 1});
+    this.arm(); // cleared only when the host's welcome arrives
+    peer.on('open', () => {
+      if (s !== this.sess) return;
+      this.status(`CONNECTING TO ROOM ${room}...`);
+      const conn = this.hostConn = peer.connect(room, {reliable: true}); // exact PeerJS ID
+      conn.on('open', () => {
+        if (s !== this.sess) return;
+        this.status(`CONNECTED — SYNCING WITH ROOM ${room}...`);
+        conn.send({t: 'hello', name: this.name});
+      });
+      conn.on('data', d => { if (s === this.sess) this.receive(d, conn) });
+      conn.on('close', () => { if (s === this.sess) this.fail(this.coop ? 'HOST DISCONNECTED' : 'CONNECTION FAILED: HOST CLOSED THE CONNECTION') });
+      conn.on('error', e => { if (s === this.sess) this.fail(errText(e)) });
+    });
+    peer.on('disconnected', () => {
+      if (s !== this.sess || peer.destroyed) return;
+      if (this.hostConn?.open) peer.reconnect(); // P2P link is still alive
+      else this.fail(errText({type: 'disconnected'}));
+    });
+    peer.on('close', () => { if (s === this.sess) this.fail('CONNECTION CLOSED') });
+    peer.on('error', e => {
+      if (s !== this.sess) return;
+      if (this.coop && this.hostConn?.open) { this.g.say(errText(e), 2500); return } // signaling hiccup only
+      this.fail(errText(e));
     });
   }
   dropClient(id) {
@@ -93,6 +161,7 @@ export class Multiplayer {
   }
   endCoop(msg) {
     if (!this.coop) return;
+    this.disarm(); this.sess++;
     const wasDead = !this.alive;
     this.coop = false; this.isHost = false; this.spectating = false; this.follow = null; this.alive = true;
     for (const id of [...this.remotes.keys()]) this.removeRemote(id);
@@ -146,7 +215,8 @@ export class Multiplayer {
     }
     switch (d.t) {
       case 'welcome':
-        this.coop = true; this.alive = true;
+        if (this.coop) break;
+        this.disarm(); this.coop = true; this.alive = true;
         for (const p of d.players || []) this.addRemote(p.id, p.name, p.alive !== false);
         this.startLevel(d.seed, d.level);
         this.status(`CONNECTED TO ROOM ${this.room}`); $('lb-enter').style.display = 'inline-block';
@@ -156,7 +226,7 @@ export class Multiplayer {
       case 's': if (finite(d)) this.remotes.get(d.id)?.push(d); break;
       case 'player-death': case 'player-alive': this.setAlive(d.id, d.t === 'player-alive'); break;
       case 'escape': if (Number.isInteger(d.seed) && Number.isInteger(d.level)) this.startLevel(d.seed, d.level); break;
-      case 'full': this.status('ROOM FULL (4/4)'); this.hostConn = null; this.peer?.destroy(); this.peer = null; this.lockButtons(false); break;
+      case 'full': this.fail(`CONNECTION FAILED: ROOM FULL (${MAX}/${MAX})`); break;
     }
   }
 
