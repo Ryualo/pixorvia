@@ -916,4 +916,111 @@ class Audio{
   // the kill: distorted high shriek + sub-drop, clipping, then silence
   killScream(){
     if(!this.ctx)return;const x=this.ctx,t=x.currentTime;
-    const bus=x.createGain();bus.gain.value=.9;const ws=x.createWaveShaper();ws.curve=this.clip
+    const bus=x.createGain();bus.gain.value=.9;const ws=x.createWaveShaper();ws.curve=this.clipCurve();ws.oversample='4x';
+    bus.connect(ws);ws.connect(this.master);
+    const sub=x.createOscillator(),sg=x.createGain();sub.type='sine';sub.frequency.setValueAtTime(150,t);sub.frequency.exponentialRampToValueAtTime(20,t+1.1);
+    sg.gain.setValueAtTime(0,t);sg.gain.linearRampToValueAtTime(1.4,t+.04);sg.gain.setValueAtTime(1.4,t+.5);sg.gain.exponentialRampToValueAtTime(.0001,t+1.5);sub.connect(sg);sg.connect(bus);sub.start(t);sub.stop(t+1.55);
+    const sub2=x.createOscillator(),sg2=x.createGain();sub2.type='triangle';sub2.frequency.setValueAtTime(74,t);sub2.frequency.exponentialRampToValueAtTime(19,t+1.1);sg2.gain.setValueAtTime(.9,t);sg2.gain.exponentialRampToValueAtTime(.0001,t+1.5);sub2.connect(sg2);sg2.connect(bus);sub2.start(t);sub2.stop(t+1.55);
+    for(const f of[2400,3100,4200,5300]){const o=x.createOscillator(),og=x.createGain();o.type='sawtooth';o.frequency.setValueAtTime(f*rnd(.97,1.03),t);o.frequency.exponentialRampToValueAtTime(f*.45,t+1.1);og.gain.setValueAtTime(.16,t);og.gain.setValueAtTime(.2,t+.35);og.gain.exponentialRampToValueAtTime(.0001,t+1.4);o.connect(og);og.connect(bus);o.start(t);o.stop(t+1.45)}
+    const n=x.createBufferSource(),nb=x.createBiquadFilter(),ng=x.createGain();n.buffer=this.noise;n.loop=true;nb.type='bandpass';nb.frequency.value=5200;nb.Q.value=.8;ng.gain.setValueAtTime(.3,t);ng.gain.exponentialRampToValueAtTime(.0001,t+1.2);n.connect(nb);nb.connect(ng);ng.connect(bus);n.start(t);n.stop(t+1.25);
+    this.silence(true);setTimeout(()=>{for(const nd of[bus,ws,sg,sg2,ng])try{nd.disconnect()}catch(e){}},1700);
+  }
+  clipCurve(){const N=2048,c=new Float32Array(N);for(let i=0;i<N;i++){const v=i/(N-1)*2-1;c[i]=Math.tanh(v*4.5)}return c}
+  shutter(){
+    if(!this.ctx)return;const x=this.ctx,t=x.currentTime;
+    const s=x.createBufferSource(),bp=x.createBiquadFilter(),g=x.createGain();s.buffer=this.noise;bp.type='bandpass';bp.frequency.setValueAtTime(4200,t);bp.frequency.exponentialRampToValueAtTime(900,t+.09);bp.Q.value=1.5;g.gain.setValueAtTime(.55,t);g.gain.exponentialRampToValueAtTime(.0001,t+.12);s.connect(bp);bp.connect(g);g.connect(this.master);s.start(t);s.stop(t+.14);
+    this.tone(2200,.05,.18,'square');this.tone(340,.14,.12,'square');this.tone(90,.22,.1,'sine');
+  }
+  hiss(pos){
+    if(!this.ctx)return;const x=this.ctx,t=x.currentTime,dur=rnd(.4,.9);
+    const s=x.createBufferSource(),hp=x.createBiquadFilter(),g=x.createGain();s.buffer=this.noise;s.loop=true;hp.type='highpass';hp.frequency.setValueAtTime(3000,t);hp.frequency.exponentialRampToValueAtTime(700,t+dur);
+    g.gain.setValueAtTime(.0001,t);g.gain.linearRampToValueAtTime(.22,t+.05);g.gain.exponentialRampToValueAtTime(.0001,t+dur);s.connect(hp);hp.connect(g);this.spatial(g,pos,1);s.start(t);s.stop(t+dur+.05);
+    const o=this.tone(rnd(1900,2600),dur,.09,'square',pos);if(o)o.frequency.exponentialRampToValueAtTime(rnd(200,400),t+dur);
+  }
+  thud(pos,near=true){
+    if(!this.ctx)return;const x=this.ctx,t=x.currentTime;
+    const o=x.createOscillator(),g=x.createGain();o.type='sine';o.frequency.setValueAtTime(near?88:70,t);o.frequency.exponentialRampToValueAtTime(26,t+.22);
+    g.gain.setValueAtTime(near?.75:.5,t);g.gain.exponentialRampToValueAtTime(.0001,t+.32);o.connect(g);
+    if(near)g.connect(this.master);else this.spatial(g,pos,1,2);
+    o.start(t);o.stop(t+.35);
+    const s=x.createBufferSource(),lp=x.createBiquadFilter(),sg=x.createGain();s.buffer=this.stepBuf;lp.type='lowpass';lp.frequency.value=420;sg.gain.setValueAtTime(.4,t);sg.gain.exponentialRampToValueAtTime(.0001,t+.16);s.connect(lp);lp.connect(sg);if(near)sg.connect(this.master);else this.spatial(sg,pos,1,2);s.start(t);s.stop(t+.18);
+  }
+  jumpIntro(){this.tone(60,.5,.3,'sine');this.tone(1200,.1,.08,'sawtooth')}
+}
+
+class Game{
+  constructor(){
+    this.renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));this.renderer.setSize(innerWidth,innerHeight);this.renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(this.renderer.domElement);
+    this.scene=new THREE.Scene();this.scene.background=new THREE.Color(CFG.FOG[0]);this.scene.fog=new THREE.Fog(...CFG.FOG);
+    this.camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,90);this.scene.add(this.camera);
+    buildMaterials();
+    this.level=-1;this.dead=false;this.dark=false;this.camCD=0;this.sayT=0;this.recT=0;this.distT=rnd(20,40);this.trackY=-10;
+    this.goo=new GooTrail(this.scene);this.audio=new Audio(this);this.lighting=new Lighting(this.scene);this.player=new Player(this);this.flash=new Flashlight(this);this.monster=new Monster(this);
+    this.newLevel();
+    const start=$('start'),c=this.player.controls;
+    start.addEventListener('click',()=>{this.audio.init();c.lock()});
+    c.addEventListener('lock',()=>start.classList.add('hidden'));c.addEventListener('unlock',()=>{if(!this.dead)start.classList.remove('hidden')});
+    this.coords=$('coords');this.status=$('status');this.clockEl=$('clock');this.track=$('track');
+    addEventListener('resize',()=>this.resize());this.clock=new THREE.Clock();this.acc=0;this.renderer.setAnimationLoop(()=>this.loop());
+  }
+  newLevel(){
+    this.level++;this.world?.dispose();this.goo.clear();
+    const data=new Maze(CFG.SIZE).generate();this.world=new World(this.scene,data);this.lighting.setWorld(this.world);this.monster.reset();
+    this.camera.position.set(data.spawn.x*CFG.CELL,CFG.EYE,data.spawn.y*CFG.CELL);this.flash.battery=Math.max(this.flash.battery,.6);
+    this.dark=false;this.camCD=0;this.flash.on=true;this.audio.restore();$('dark').style.opacity=0;
+    this.lighting.setDark(false);this.scene.background.set(CFG.FOG[0]);this.scene.fog.color.set(CFG.FOG[0]);
+    $('level').textContent=this.level;$('danger').style.opacity=0;this.say(this.level?'THE LEVEL CHANGED.':'NO SIGNAL.');
+  }
+  say(t,ms=1600){const m=$('msg');m.textContent=t;m.classList.add('show');clearTimeout(this.sayT);this.sayT=setTimeout(()=>m.classList.remove('show'),ms)}
+  warn(t,ms){const w=$('warning');w.textContent=t;w.classList.add('show');clearTimeout(this.warnT);this.warnT=setTimeout(()=>w.classList.remove('show'),ms)}
+  glitch(){const v=$('vhs');v.classList.remove('glitch');void v.offsetWidth;v.classList.add('glitch')}
+  cameraBlast(){
+    if(this.dead||this.camCD>0||this.dark||!this.player.controls.isLocked)return;this.camCD=2;
+    this.audio.shutter();this.glitch();
+    const f=$('flash');f.style.transition='none';f.style.opacity=1;requestAnimationFrame(()=>{f.style.transition='opacity .45s';f.style.opacity=0});
+    this.monster.onFlash();
+  }
+  // battery at 0%: lights die, dynamo dies, eyes come for you
+  blackout(){
+    if(this.dark||this.dead)return;this.dark=true;
+    this.audio.click();this.audio.powerDown();
+    for(const l of this.lighting.pool)l.intensity=0;this.lighting.setDark(true);
+    this.scene.background.set(0);this.scene.fog.color.set(0);
+    this.flash.spot.intensity=0;this.flash.fill.intensity=0;
+    $('dark').style.opacity=.35;
+    this.warn('POWER FAILURE — RUN',2500);this.glitch();
+    this.monster.enterBloodlust();
+  }
+  killPlayer(){
+    if(this.dead)return;
+    this.dead=true;this.player.controls.unlock();this.monster.active=false;this.monster.group.visible=false;
+    const j=$('jumpscare');j.classList.remove('active');void j.offsetWidth;j.classList.add('active');
+    this.audio.jumpIntro();this.audio.killScream();this.glitch();this.warn('YOU WERE FOUND',2000);
+    setTimeout(()=>{j.classList.remove('active');this.dead=false;this.dark=false;this.newLevel();this.audio.restore();this.audio.silence(false);$('dark').style.opacity=0;$('start').classList.remove('hidden')},2000);
+  }
+  update(dt){
+    if(this.dead)return;
+    this.player.update(dt);this.flash.update(dt);this.monster.update(dt);this.lighting.update(dt,this.camera.position,this.monster);this.audio.update(dt);
+    if(!this.dark)this.audio.setStress(this.lighting.maxStress);
+    if(this.player.controls.isLocked&&(this.distT-=dt)<=0&&!this.dark){this.audio.distant();this.distT=rnd(25,60)}
+  }
+  hud(dt){
+    this.recT+=dt;const s=this.recT|0;this.clockEl.textContent=[s/3600|0,(s/60|0)%60,s%60].map(v=>String(v).padStart(2,'0')).join(':');
+    const c=this.world.cell(this.camera.position.x,this.camera.position.z);this.coords.textContent=String(c.x).padStart(3,'0')+','+String(c.y).padStart(3,'0');
+    const m=this.monster,d=m.active?m.dist():99;
+    // stalking is silent to the sensors; only overt actions register
+    const detected=m.active&&m.mode==='strike';
+    if(detected)this.status.textContent='AUDIO: MOVEMENT DETECTED';
+    else if(m.active&&m.mode==='dart'&&d<30)this.status.textContent='AUDIO: SIGNAL DISTORTION';
+    else if(m.active&&m.mode==='retreat'&&d<30)this.status.textContent='AUDIO: ELECTRICAL INTERFERENCE';
+    else if(this.lighting.maxStress>.3)this.status.textContent='AUDIO: ELECTRICAL INTERFERENCE';
+    else this.status.textContent='AUDIO: LOW HUM';
+    this.trackY=(this.trackY+dt*(60+(detected?240:0)))%(innerHeight+20);this.track.style.transform=`translateY(${this.trackY}px)`;
+  }
+  loop(){const d=Math.min(this.clock.getDelta(),.1);this.acc=Math.min(this.acc+d,.25);while(this.acc>=CFG.STEP){this.update(CFG.STEP);this.acc-=CFG.STEP}this.hud(d);this.renderer.render(this.scene,this.camera)}
+  resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight)}
+}
+
+window.game=new Game();
+// A program generated by Ryual
