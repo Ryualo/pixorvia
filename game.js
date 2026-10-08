@@ -316,25 +316,49 @@ class Player{
     $('btn-c')?.addEventListener('touchstart', e => { e.preventDefault(); g.cameraBlast(); });
 
     // Touch Look Camera
-    let tX, tY;
-    document.addEventListener('touchstart', e => {
-      if(e.touches.length === 1 && e.target.tagName === 'CANVAS') { 
-        tX = e.touches[0].pageX; tY = e.touches[0].pageY; 
-      }
-    }, {passive: false});
-    document.addEventListener('touchmove', e => {
-      if(e.touches.length === 1 && e.target.tagName === 'CANVAS') {
-        e.preventDefault();
-        const dx = e.touches[0].pageX - tX, dy = e.touches[0].pageY - tY;
-        tX = e.touches[0].pageX; tY = e.touches[0].pageY;
-        
-        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
-        euler.setFromQuaternion(g.camera.quaternion);
-        euler.y -= dx * 0.005; euler.x -= dy * 0.005;
-        euler.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, euler.x));
-        g.camera.quaternion.setFromEuler(euler);
-      }
-    }, {passive: false});
+  $('btn-restart')?.addEventListener('touchstart', e => { e.preventDefault(); if(!g.dead) g.newLevel(); });
+
+// Touch Look Camera (Multitouch Support)
+let camTouchId = null;
+let tX, tY;
+
+document.addEventListener('touchstart', e => {
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    const t = e.changedTouches[i];
+    if (t.target.tagName === 'CANVAS' && camTouchId === null) {
+      camTouchId = t.identifier;
+      tX = t.pageX; tY = t.pageY;
+    }
+  }
+}, {passive: false});
+
+document.addEventListener('touchmove', e => {
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    const t = e.changedTouches[i];
+    if (t.identifier === camTouchId) {
+      e.preventDefault();
+      const dx = t.pageX - tX, dy = t.pageY - tY;
+      tX = t.pageX; tY = t.pageY;
+      const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+      euler.setFromQuaternion(g.camera.quaternion);
+      euler.y -= dx * 0.005; euler.x -= dy * 0.005;
+      euler.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, euler.x));
+      g.camera.quaternion.setFromEuler(euler);
+    }
+  }
+}, {passive: false});
+
+document.addEventListener('touchend', e => {
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    if (e.changedTouches[i].identifier === camTouchId) camTouchId = null;
+  }
+}, {passive: false});
+
+document.addEventListener('touchcancel', e => {
+  for (let i = 0; i < e.changedTouches.length; i++) {
+    if (e.changedTouches[i].identifier === camTouchId) camTouchId = null;
+  }
+}, {passive: false});
   }
   
   get running(){return (this.keys.ShiftLeft||this.keys.ShiftRight)&&!this.keys.KeyE} // winding disables sprint
