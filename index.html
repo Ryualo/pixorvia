@@ -50,6 +50,17 @@ canvas{display:block}
 @keyframes shift{50%{transform:translateX(6px) skewX(2deg);filter:hue-rotate(20deg) saturate(1.6)}}
 @keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-3%,2%)}66%{transform:translate(2%,-3%)}100%{transform:translate(-2%,-1%)}}
 @keyframes blink{50%{opacity:.15}}
+#lobby{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:rgba(0,0,0,.94);color:#e7d994;letter-spacing:.08em;text-align:center}
+#lobby.hidden{display:none}
+#lobby .box{min-width:330px;max-width:92vw;padding:28px 36px;border:1px solid rgba(235,220,150,.25);background:rgba(0,0,0,.55);box-shadow:0 0 90px #000}
+#lobby b{display:block;font-size:22px;margin-bottom:16px}
+#lobby button,#lobby input{font:inherit;color:#e7d994;background:rgba(40,36,18,.7);border:1px solid rgba(235,220,150,.35);padding:9px 14px;margin:5px;letter-spacing:.08em}
+#lobby button{cursor:pointer}#lobby button:disabled{opacity:.4;cursor:default}
+#lobby input{width:170px;text-transform:uppercase}
+#lb-panel{display:none}#lb-enter{display:none}
+#lb-status{min-height:1.6em;margin-top:12px;font-size:12px;color:#aaa57e}
+#lb-players{font-size:11px;color:#aaa57e}
+#mp-hud{position:fixed;top:60px;right:20px;z-index:21;display:none;pointer-events:none;color:#d4cfaa;font-size:10px;line-height:1.7;text-align:right;white-space:pre;text-shadow:0 1px 6px #000;opacity:.8}
 #mobile-ui { display: none; }
 @media (pointer: coarse) {
   #mobile-ui { display: block; position: fixed; inset: 0; z-index: 999; pointer-events: none; }
@@ -60,6 +71,7 @@ canvas{display:block}
   #btn-w { grid-area: w; } #btn-a { grid-area: a; } #btn-s { grid-area: s; } #btn-d { grid-area: d; }
 }
 </style>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
 </head>
 <body>
@@ -78,6 +90,18 @@ canvas{display:block}
 </div>
 
 <div id="jumpscare"><div class="face"><div class="head"></div><div class="eye e1"></div><div class="eye e2"></div><div class="mouth"></div></div></div>
+<div id="lobby"><div class="box">
+<b>LEVEL 0 // NOCLIP ERROR</b>
+<div id="lb-modes"><button id="lb-solo">SOLO</button><button id="lb-coop">CO-OP (2–4)</button></div>
+<div id="lb-panel">
+<div><input id="lb-name" maxlength="14" placeholder="YOUR NAME"></div>
+<div><button id="lb-host">HOST ROOM</button></div>
+<div><input id="lb-room" maxlength="5" placeholder="ROOM ID"><button id="lb-join">JOIN</button></div>
+<div id="lb-status"></div><div id="lb-players"></div>
+<button id="lb-enter">ENTER LEVEL 0</button>
+</div>
+</div></div>
+<div id="mp-hud"></div>
 <div id="flash"></div><div id="dark"></div>
 <div id="vhs"><div class="scan"></div><div class="vig"></div><div class="grain"></div><div class="track" id="track"></div></div>
 <div id="mobile-ui">
