@@ -26,6 +26,81 @@ const loadPeer = () => window.Peer ? Promise.resolve(window.Peer) : (peerLoad ||
   };
   next(0);
 }));
+/* ======================================================================
+   ICE CONFIGURATION  —  the ONLY thing needed for cross-network play
+   ----------------------------------------------------------------------
+   Same-WiFi works with STUN alone (hosts are on the LAN, so the direct
+   candidate pair succeeds).  Across different networks both peers sit
+   behind carrier-grade NAT / symmetric NAT, which never yields a usable
+   host candidate pair — ICE needs a relay (TURN) or the connection just
+   hangs until the timeout.  Everything below is plain WebRTC config, so
+   it works unchanged on GitHub Pages (static + HTTPS).
+
+   Add your TURN credentials to TURN_SERVERS.  Any of these providers
+   works (they speak standard TURN over the given ports):
+     - Metered / Open Relay  (free tier, dashboard gives url+user+cred)
+     - Twilio Network Traversal Service
+     - Cloudflare Calls / coturn self-hosted
+   Leave the array empty to stay STUN-only (i.e. keep the current
+   LAN-only behaviour) — nothing else in the file needs to change.
+   ====================================================================== */
+const STUN_SERVERS = [
+  {urls: 'stun:stun.l.google.com:19302'},
+  {urls: 'stun:stun1.l.google.com:19302'},
+  {urls: 'stun:stun.cloudflare.com:3478'},
+];
+
+// >>> INSERT YOUR TURN CREDENTIALS HERE <<<
+// TURN needs BOTH tcp:443 and udp:3478 — tcp:443/turns:443 is what gets
+// through restrictive corporate / school / mobile firewalls.
+const TURN_SERVERS = [
+  // {urls: 'turn:YOUR_TURN_HOST:3478',  username: 'YOUR_USERNAME', credential: 'YOUR_CREDENTIAL'},
+  // {urls: 'turn:YOUR_TURN_HOST:3478?transport=tcp', username: 'YOUR_USERNAME', credential: 'YOUR_CREDENTIAL'},
+  // {urls: 'turns:YOUR_TURN_HOST:443?transport=tcp', username: 'YOUR_USERNAME', credential: 'YOUR_CREDENTIAL'},
+  // --- Free public relay (no account, best-effort, rate limited).
+  //     Uncomment for an instant cross-network test, then replace with
+  //     your own credentials before shipping.
+  // {urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject'},
+  // {urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject'},
+];
+
+// ICE policy: with a TURN server available, "all" lets ICE use the relay
+// only when the direct path fails (best latency when it can, reliable when
+// it cannot).  Force "relay" while debugging a stubborn network.
+const ICE_TRANSPORT_POLICY = 'all';
+const ICE_DEBUG = true; // verbose ICE state logging to the console
+
+const iceServers = [...STUN_SERVERS, ...TURN_SERVERS];
+const hasTurn = TURN_SERVERS.length > 0;
+
+// one shared options object shape for both the host and the joiner,
+// so ICE config can never drift between the two roles.
+const peerOptions = () => ({
+  debug: ICE_DEBUG ? 2 : 0,
+  config: {iceServers, iceTransportPolicy: ICE_TRANSPORT_POLICY},
+});
+
+// true when this peer has no reachable relay, i.e. cross-network can't work
+const turnWarning = () => hasTurn ? null
+  : 'NO TURN SERVER CONFIGURED — SEARCHING FOR A DIRECT CONNECTION (MIGHT WORK ON THE SAME WI-FI ONLY)';
+
+// PeerJS hands us the underlying RTCPeerConnection on 'iceStateChanged' via
+// the internal event, and exposes the state on the connection object.  These
+// helpers turn ICE's cryptic states into something readable in the log.
+const ICE_STATE = {
+  'new': 'STARTING', checking: 'CHECKING CANDIDATES (STUN/TURN)...',
+  connected: 'DIRECT PATH FOUND', completed: 'PATH ESTABLISHED',
+  disconnected: 'PATH LOST — RETRYING', failed: 'NO PATH — LIKELY BLOCKED BY NAT/FIREWALL',
+  closed: 'CLOSED',
+};
+const iceLog = (who, state) => {
+  if (!ICE_DEBUG) return;
+  console.log(`[ICE] ${who}: ${ICE_STATE[state] || state}`);
+  if (state === 'failed') console.warn(hasTurn
+    ? '[ICE] Relay failed too — verify your TURN url / username / credential are correct and the TURN server is reachable.'
+    : '[ICE] No TURN server is configured (see TURN_SERVERS in multiplayer.js). Cross-network play requires TURN.');
+};
+
 const E = new THREE.Euler(0, 0, 0, 'YXZ');
 const clean = s => String(s || '').replace(/[^\w \-.]/g, '').trim().slice(0, 14) || 'WANDERER';
 const newSeed = () => (Math.random() * 2 ** 32) >>> 0;
@@ -68,7 +143,18 @@ export class Multiplayer {
   lockButtons(on) { for (const id of ['lb-host', 'lb-join']) $(id).disabled = on }
 
   // ---------- connection setup (star topology: host relays) ----------
-  arm() { this.disarm(); this.timer = setTimeout(() => this.fail('CONNECTION FAILED (TIMED OUT)'), TIMEOUT) }
+  arm() {
+    this.disarm();
+    this.lastIce = 'new';
+    this.timer = setTimeout(() => {
+      const st = this.lastIce || 'unknown';
+      const reason = ICE_STATE[st] || st;
+      const hint = st === 'failed'
+        ? (hasTurn ? ' — CHECK TURN CREDENTIALS / SERVER REACHABILITY' : ' — CONFIGURE A TURN SERVER IN MULTIPLAYER.JS')
+        : st === 'checking' ? ' — CANDIDATES NEVER RESOLVED (DNS/FIREWALL/STUN BLOCKED)' : '';
+      this.fail(`CONNECTION FAILED (${reason.toUpperCase()}${hint})`);
+    }, TIMEOUT);
+  }
   disarm() { clearTimeout(this.timer); this.timer = 0 }
   // abort a pending (or live) connection and show why
   fail(msg) {
@@ -84,7 +170,10 @@ export class Multiplayer {
     try { await loadPeer() } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET') }
     const s = ++this.sess, room = code();
     this.status('CREATING ROOM...');
-    const peer = this.peer = new Peer(room, {debug: 1}); // room ID == real PeerJS ID
+    const peer = this.peer = new Peer(room, peerOptions()); // room ID == real PeerJS ID
+    if (ICE_DEBUG) console.log('[MP] HOST: starting with ICE config', JSON.stringify(iceServers));
+    const w = turnWarning(); if (w) { console.warn('[MP]', w); this.status(w) }
+    this.lastIce = 'new';
     this.arm();
     peer.on('open', id => {
       if (s !== this.sess) return;
@@ -95,7 +184,14 @@ export class Multiplayer {
       this.status(`ROOM ID: ${id} — SHARE IT WITH UP TO ${MAX - 1} FRIENDS`);
       $('lb-enter').style.display = 'inline-block'; this.roster();
     });
-    peer.on('connection', conn => this.acceptClient(conn, s));
+    peer.on('connection', conn => {
+      if (ICE_DEBUG) {
+        conn.on('iceStateChanged', st => { this.lastIce = st; iceLog(`HOST↔${conn.peer}`, st) });
+        try { conn.peerConnection?.addEventListener?.('icecandidateerror', e =>
+          console.warn(`[ICE] HOST↔${conn.peer} candidate error`, e?.errorCode, e?.errorText || e)) } catch {}
+      }
+      this.acceptClient(conn, s);
+    });
     peer.on('disconnected', () => {
       if (s !== this.sess || peer.destroyed) return;
       if (!this.coop) return this.fail(errText({type: 'disconnected'}));
@@ -131,12 +227,20 @@ export class Multiplayer {
     try { await loadPeer() } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET') }
     const s = ++this.sess;
     this.status('CONNECTING TO SIGNALING SERVER...');
-    const peer = this.peer = new Peer({debug: 1});
+    const peer = this.peer = new Peer(peerOptions());
+    if (ICE_DEBUG) console.log('[MP] CLIENT: connecting with ICE config', JSON.stringify(iceServers));
+    const w = turnWarning(); if (w) { console.warn('[MP]', w); this.status(w) }
+    this.lastIce = 'new';
     this.arm(); // cleared only when the host's welcome arrives
     peer.on('open', () => {
       if (s !== this.sess) return;
       this.status(`CONNECTING TO ROOM ${room}...`);
       const conn = this.hostConn = peer.connect(room, {reliable: true}); // exact PeerJS ID
+      if (ICE_DEBUG) {
+        conn.on('iceStateChanged', st => { this.lastIce = st; iceLog(`CLIENT↔${room}`, st) });
+        try { conn.peerConnection?.addEventListener?.('icecandidateerror', e =>
+          console.warn(`[ICE] CLIENT↔${room} candidate error`, e?.errorCode, e?.errorText || e)) } catch {}
+      }
       conn.on('open', () => {
         if (s !== this.sess) return;
         this.status(`CONNECTED — SYNCING WITH ROOM ${room}...`);
