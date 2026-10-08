@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';
+import {Multiplayer} from './multiplayer.js';
 
 const CFG={
   SIZE:51,CELL:4,WALL_H:3.1,EYE:1.62,R:.3,
@@ -13,6 +14,7 @@ const T={FLOOR:0,WALL:1,PILLAR:2};
 const $=id=>document.getElementById(id);
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 const rnd=(a,b)=>a+Math.random()*(b-a);
+const mulberry32=s=>()=>{s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
 const DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
 const V1=new THREE.Vector3(),V2=new THREE.Vector3(),V3=new THREE.Vector3(),FWD=new THREE.Vector3();
 
@@ -298,7 +300,7 @@ class Lighting{
 class Player{
   constructor(g){
     this.g=g;this.controls=new PointerLockControls(g.camera,document.body);this.keys={};this.bob=0;this.moving=false;this.dir=new THREE.Vector3();this.right=new THREE.Vector3();
-    addEventListener('keydown',e=>{this.keys[e.code]=true;if(e.code==='KeyF'&&!e.repeat&&this.controls.isLocked)g.flash.toggle();if(e.code==='KeyR'&&!this.controls.isLocked&&!g.dead)g.newLevel()});
+    addEventListener('keydown',e=>{this.keys[e.code]=true;if(e.code==='KeyF'&&!e.repeat&&this.controls.isLocked)g.flash.toggle();if(e.code==='KeyR'&&!this.controls.isLocked&&!g.dead)g.mp?.coop?g.mp.escape():g.newLevel()});
     addEventListener('mousedown',e=>{if(e.button===0&&this.controls.isLocked&&!g.dead&&e.target.tagName==='CANVAS')g.cameraBlast()});
     addEventListener('keydown',e=>{if(e.code==='KeyC'&&!e.repeat&&this.controls.isLocked&&!g.dead)g.cameraBlast()});
     addEventListener('keyup',e=>this.keys[e.code]=false);addEventListener('blur',()=>this.keys={});
@@ -316,7 +318,7 @@ class Player{
     $('btn-c')?.addEventListener('touchstart', e => { e.preventDefault(); g.cameraBlast(); });
 
     // Touch Look Camera
-  $('btn-restart')?.addEventListener('touchstart', e => { e.preventDefault(); if(!g.dead) g.newLevel(); });
+  $('btn-restart')?.addEventListener('touchstart', e => { e.preventDefault(); if(!g.dead) g.mp?.coop ? g.mp.escape() : g.newLevel(); });
 
 // Touch Look Camera (Multitouch Support)
 let camTouchId = null;
@@ -1015,7 +1017,7 @@ class Game{
     buildMaterials();
     this.level=-1;this.dead=false;this.dark=false;this.camCD=0;this.sayT=0;this.recT=0;this.distT=rnd(20,40);this.trackY=-10;
     this.goo=new GooTrail(this.scene);this.audio=new Audio(this);this.lighting=new Lighting(this.scene);this.player=new Player(this);this.flash=new Flashlight(this);this.monster=new Monster(this);
-    this.newLevel();
+    this.newLevel();this.mp=new Multiplayer(this);
     const start=$('start'),c=this.player.controls;
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
       start.style.display = 'none';
@@ -1036,9 +1038,12 @@ class Game{
       else document.exitFullscreen();
     });
   }
-  newLevel(){
+  newLevel(seed){
     this.level++;this.world?.dispose();this.goo.clear();
-    const data=new Maze(CFG.SIZE).generate();this.world=new World(this.scene,data);this.lighting.setWorld(this.world);this.monster.reset();
+    // co-op: seed Math.random only while the maze + fixtures are built so every peer gets the same map
+    const mr=Math.random;if(seed!=null)Math.random=mulberry32(seed);
+    let data;try{data=new Maze(CFG.SIZE).generate();this.world=new World(this.scene,data)}finally{Math.random=mr}
+    this.lighting.setWorld(this.world);this.monster.reset();
     this.camera.position.set(data.spawn.x*CFG.CELL,CFG.EYE,data.spawn.y*CFG.CELL);this.flash.battery=Math.max(this.flash.battery,.6);
     this.dark=false;this.camCD=0;this.flash.on=true;this.audio.restore();$('dark').style.opacity=0;
     this.lighting.setDark(false);this.scene.background.set(CFG.FOG[0]);this.scene.fog.color.set(CFG.FOG[0]);
@@ -1069,7 +1074,11 @@ class Game{
     this.dead=true;this.player.controls.unlock();this.monster.active=false;this.monster.group.visible=false;
     const j=$('jumpscare');j.classList.remove('active');void j.offsetWidth;j.classList.add('active');
     this.audio.jumpIntro();this.audio.killScream();this.glitch();this.warn('YOU WERE FOUND',2000);
-    setTimeout(()=>{j.classList.remove('active');this.dead=false;this.dark=false;this.newLevel();this.audio.restore();this.audio.silence(false);$('dark').style.opacity=0;$('start').classList.remove('hidden')},2000);
+    if(this.mp.coop)this.mp.die();
+    setTimeout(()=>{j.classList.remove('active');if(!this.dead)return;if(this.mp.coop)this.mp.spectate();else this.respawn()},2000);
+  }
+  respawn(seed){
+    $('jumpscare').classList.remove('active');this.dead=false;this.dark=false;this.newLevel(seed);this.audio.restore();this.audio.silence(false);$('dark').style.opacity=0;$('start').classList.remove('hidden');
   }
   update(dt){
     if(this.dead)return;
@@ -1090,7 +1099,7 @@ class Game{
     else this.status.textContent='AUDIO: LOW HUM';
     this.trackY=(this.trackY+dt*(60+(detected?240:0)))%(innerHeight+20);this.track.style.transform=`translateY(${this.trackY}px)`;
   }
-  loop(){const d=Math.min(this.clock.getDelta(),.1);this.acc=Math.min(this.acc+d,.25);while(this.acc>=CFG.STEP){this.update(CFG.STEP);this.acc-=CFG.STEP}this.hud(d);this.renderer.render(this.scene,this.camera)}
+  loop(){const d=Math.min(this.clock.getDelta(),.1);this.acc=Math.min(this.acc+d,.25);while(this.acc>=CFG.STEP){this.update(CFG.STEP);this.acc-=CFG.STEP}this.mp.update(d);this.hud(d);this.renderer.render(this.scene,this.camera)}
   resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight)}
 }
 
