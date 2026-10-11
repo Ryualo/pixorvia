@@ -1,11 +1,14 @@
 import * as THREE from 'three';
+import { StressSystem } from './stress.js';
 import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';
 import {Multiplayer} from './multiplayer.js';
+import {createMonsterAI} from './monster.js';
+
 
 const CFG={
   SIZE:51,CELL:4,WALL_H:3.1,EYE:1.62,R:.3,
   WALK:3.1,RUN:5.4,BOB_AMP:.045,BOB_FREQ:9,STEP:1/60,
-  FOG:[0x171406,3,40],LIGHTS:9,LIGHT_RANGE:15,FIXTURE_EVERY:3,
+  FOG:[0x171406,3,40],LIGHTS:5,LIGHT_RANGE:15,FIXTURE_EVERY:3,
   M_WANDER:1.5,M_STALK:2.0,M_HUNT:5.8,M_FLEE:18,
   WAKE:18,BEAM_RANGE:24,BEAM_ANGLE:.3,
   DRAIN:1/100,CHARGE:1/300
@@ -111,7 +114,7 @@ class Maze{
     let sp={x:n>>1,y:n>>1},best=1e9;
     for(let x=1;x<n-1;x++)for(let y=1;y<n-1;y++)if(g[x][y]===T.FLOOR){const d=Math.hypot(x-n/2,y-n/2);if(d<best){best=d;sp={x,y}}}
     this.seal(g,sp.x,sp.y);
-    return{grid:g,spawn:sp};
+    return{grid:g,spawn:sp,rooms};
   }
   seal(g,sx,sy){
     const n=this.n,seen=new Uint8Array(n*n),st=[sx*n+sy];seen[sx*n+sy]=1;
@@ -127,7 +130,7 @@ class Maze{
 }
 
 class World{
-  constructor(scene,data){this.scene=scene;this.grid=data.grid;this.n=data.grid.length;this.root=new THREE.Group();scene.add(this.root);this.fixtures=[];this.dirty=false;this.build()}
+  constructor(scene,data){this.scene=scene;this.grid=data.grid;this.n=data.grid.length;this.largeRooms=(data.rooms||[]).filter(r=>r[2]>=7&&r[3]>=7);this.root=new THREE.Group();scene.add(this.root);this.fixtures=[];this.dirty=false;this.build()}
   w(i){return i*CFG.CELL}
   inst(geo,mat,items,rotX=0){
     const mesh=new THREE.InstancedMesh(geo,mat,Math.max(1,items.length)),m=new THREE.Matrix4(),r=new THREE.Matrix4().makeRotationX(rotX);
@@ -200,10 +203,11 @@ class World{
 /* ===================== PUDDLE / SLIME SLICK ===================== */
 class GooTrail{
   constructor(scene){
-    this.count=700;this.idx=0;
+    this.count=600;this.idx=0;
     this.geo=new THREE.PlaneGeometry(1,1);this.geo.rotateX(-Math.PI/2);
     this.tex=GooTrail.makeTexture();
-    this.mat=new THREE.MeshStandardMaterial({color:0x020202,roughness:.08,metalness:.15,map:this.tex,alphaMap:this.tex,transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+    // Changed to MeshBasicMaterial so it ignores lights and looks like a pitch-black void spot
+    this.mat=new THREE.MeshBasicMaterial({color:0x000000,map:this.tex,alphaMap:this.tex,transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
     this.mesh=new THREE.InstancedMesh(this.geo,this.mat,this.count);
     this.mesh.frustumCulled=false;this.mesh.renderOrder=1;
     this.m=new THREE.Matrix4();this.q=new THREE.Quaternion();this.s=new THREE.Vector3();this.p=new THREE.Vector3();this.up=new THREE.Vector3(0,1,0);
@@ -277,7 +281,14 @@ class Lighting{
     for(const f of F){
       if(f.dead)continue;
       let target=0;
-      if(mp&&monster.mode!=='stalk'){const d=Math.hypot(f.pos.x-mp.x,f.pos.z-mp.z);target=d<11?clamp((11-d)/8,0,1):0}
+      if(mp&&monster.mode!=='stalk'){
+        const dx = Math.abs(f.pos.x - mp.x);
+        const dz = Math.abs(f.pos.z - mp.z);
+        if (dx < 11 && dz < 11) {
+          const d = Math.hypot(dx, dz);
+          target = d < 11 ? clamp((11 - d) / 8, 0, 1) : 0;
+        }
+      }
       f.stress+=(target-f.stress)*Math.min(1,dt*(target>f.stress?.8:.3));
       if(f.stress<.02&&f.flick===1&&Math.random()>.0015)continue;
       f.phase+=dt;const s=f.stress;let b=1;
@@ -286,8 +297,12 @@ class Lighting{
       else if(s<.88)b=Math.random()<.35?rnd(0,.25):rnd(.7,1);
       else{f.dying+=dt;b=Math.random()<.6?0:rnd(.2,.6);if(f.dying>1.6){f.dead=true;b=0;monster.g.audio.pop(f.pos)}}
       if(s<.88)f.dying=Math.max(0,f.dying-dt);
+      
+      const oldFlick = f.flick;
       f.flick+=(b-f.flick)*.6;if(Math.abs(f.flick-1)<.02&&s<.02)f.flick=1;
-      w.setTube(f,f.dead?0:f.flick);
+      if (f.dead || Math.abs(oldFlick - f.flick) > 0.02) {
+        w.setTube(f, f.dead ? 0 : f.flick);
+      }
       if(f.pos.distanceToSquared(pos)<144)maxS=Math.max(maxS,s);
     }
     for(const f of F)if(f.dead&&f.flick!==0){f.flick=0;w.setTube(f,0)}
@@ -299,26 +314,46 @@ class Lighting{
 
 class Player{
   constructor(g){
-    this.g=g;this.controls=new PointerLockControls(g.camera,document.body);this.keys={};this.bob=0;this.moving=false;this.dir=new THREE.Vector3();this.right=new THREE.Vector3();
+    this.g=g;this.controls=new PointerLockControls(g.camera,document.body);this.keys={};this.isMobileDevice=('ontouchstart' in window)||navigator.maxTouchPoints>0;this.bob=0;this.moving=false;this.dir=new THREE.Vector3();this.right=new THREE.Vector3();
     addEventListener('keydown',e=>{this.keys[e.code]=true;if(e.code==='KeyF'&&!e.repeat&&this.controls.isLocked)g.flash.toggle();if(e.code==='KeyR'&&!this.controls.isLocked&&!g.dead)g.mp?.coop?g.mp.escape():g.newLevel()});
     addEventListener('mousedown',e=>{if(e.button===0&&this.controls.isLocked&&!g.dead&&e.target.tagName==='CANVAS')g.cameraBlast()});
     addEventListener('keydown',e=>{if(e.code==='KeyC'&&!e.repeat&&this.controls.isLocked&&!g.dead)g.cameraBlast()});
     addEventListener('keyup',e=>this.keys[e.code]=false);addEventListener('blur',()=>this.keys={});
-    // --- MOBILE TOUCH CONTROLS ---
+    // --- MOBILE CONTROLS: pointer events support touch, stylus, and mouse.
+    // Pointer capture keeps a held movement key active if the finger drifts off its button.
     const bindBtn = (id, code) => {
       const btn = $(id);
-      if(!btn) return;
-      btn.addEventListener('touchstart', e => { e.preventDefault(); this.keys[code] = true; });
-      btn.addEventListener('touchend', e => { e.preventDefault(); this.keys[code] = false; });
+      if (!btn) return;
+      const release = () => { this.keys[code] = false; };
+      btn.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        this.keys[code] = true;
+        try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      btn.addEventListener('pointerup', e => { e.preventDefault(); release(); });
+      btn.addEventListener('pointercancel', release);
+      btn.addEventListener('lostpointercapture', release);
+      // Fallback for browsers that don't dispatch PointerEvents reliably.
+      btn.addEventListener('touchstart', e => { e.preventDefault(); this.keys[code] = true; }, {passive:false});
+      btn.addEventListener('touchend', e => { e.preventDefault(); release(); }, {passive:false});
+      btn.addEventListener('touchcancel', release, {passive:false});
+      btn.addEventListener('contextmenu', e => e.preventDefault());
     };
-    bindBtn('btn-w', 'KeyW'); bindBtn('btn-a', 'KeyA'); bindBtn('btn-s', 'KeyS'); bindBtn('btn-d', 'KeyD'); 
+    bindBtn('btn-w', 'KeyW'); bindBtn('btn-a', 'KeyA'); bindBtn('btn-s', 'KeyS'); bindBtn('btn-d', 'KeyD');
     bindBtn('btn-shift', 'ShiftLeft'); bindBtn('btn-e', 'KeyE');
-    
-    $('btn-f')?.addEventListener('touchstart', e => { e.preventDefault(); g.flash.toggle(); });
-    $('btn-c')?.addEventListener('touchstart', e => { e.preventDefault(); g.cameraBlast(); });
 
-    // Touch Look Camera
-  $('btn-restart')?.addEventListener('touchstart', e => { e.preventDefault(); if(!g.dead) g.mp?.coop ? g.mp.escape() : g.newLevel(); });
+    const bindAction = (id, action) => {
+      const btn = $(id);
+      if (!btn) return;
+      let lastTouch = 0;
+      const run = e => { e.preventDefault(); const now=Date.now(); if(e.type==='touchstart' && now-lastTouch<350)return; lastTouch=now; action(); };
+      btn.addEventListener('pointerdown', run);
+      btn.addEventListener('touchstart', run, {passive:false});
+      btn.addEventListener('contextmenu', e => e.preventDefault());
+    };
+    bindAction('btn-f', () => g.flash.toggle());
+    bindAction('btn-c', () => g.cameraBlast());
+    bindAction('btn-restart', () => { if(!g.dead) g.mp?.coop ? g.mp.escape() : g.newLevel(); });
 
 // Touch Look Camera (Multitouch Support)
 let camTouchId = null;
@@ -363,18 +398,34 @@ document.addEventListener('touchcancel', e => {
 }, {passive: false});
   }
   
-  get running(){return (this.keys.ShiftLeft||this.keys.ShiftRight)&&!this.keys.KeyE} // winding disables sprint
+  get running(){
+    // Disable sprinting during the standoff
+    const standoff = this.g.stressSystem && this.g.stressSystem.dlbState === 'standoff';
+    return (this.keys.ShiftLeft||this.keys.ShiftRight)&&!this.keys.KeyE && !standoff;
+  }
   get winding(){return!!this.keys.KeyE}
+  
   update(dt){
-    if(!this.controls.isLocked||this.g.dead){this.moving=false;return}
-    const k=this.keys,wind=this.winding&&!this.g.dark,
-    s=(wind?CFG.WALK*.4:(this.running?CFG.RUN:CFG.WALK)),
-    f=(k.KeyW?1:0)-(k.KeyS?1:0),sd=(k.KeyD?1:0)-(k.KeyA?1:0),cam=this.g.camera;
+    // Pointer lock is a desktop-only input requirement; mobile must move without it.
+    if((!this.controls.isLocked && !this.isMobileDevice)||this.g.dead){this.moving=false;return}
+    
+    const standoff = this.g.stressSystem && this.g.stressSystem.dlbState === 'standoff';
+    const k=this.keys,wind=this.winding&&!this.g.dark;
+    
+    // Paralyzed with fear: drop speed to 25% if the monster is right behind them
+    let s=(wind?CFG.WALK*.4:(this.running?CFG.RUN:CFG.WALK));
+    if(standoff) s = CFG.WALK * 0.25; 
+    
+    const f=(k.KeyW?1:0)-(k.KeyS?1:0),sd=(k.KeyD?1:0)-(k.KeyA?1:0),cam=this.g.camera;
     cam.getWorldDirection(this.dir);this.dir.y=0;this.dir.normalize();this.right.crossVectors(this.dir,cam.up);
     const m=this.dir.multiplyScalar(f).add(this.right.multiplyScalar(sd));this.moving=m.lengthSq()>0;if(this.moving)m.normalize().multiplyScalar(s*dt);
     const p=cam.position,r=CFG.R,w=this.g.world;
     if(!w.collides(p.x+m.x,p.z,r))p.x+=m.x;if(!w.collides(p.x,p.z+m.z,r))p.z+=m.z;
     this.bob=this.moving?this.bob+dt*CFG.BOB_FREQ*(s/CFG.WALK):this.bob*.9;
+    
+    // If standoff is active, artificially spike the camera bob to simulate heavy heartbeat/shaking
+    if (standoff) this.bob += dt * 15;
+    
     p.y=CFG.EYE+Math.sin(this.bob)*CFG.BOB_AMP*(this.moving?1:Math.min(1,Math.abs(this.bob)));
   }
 }
@@ -409,7 +460,6 @@ class Flashlight{
   }
 }
 
-/* ===================== MONSTER: THE ELDRITCH SHADOW ===================== */
 class Monster{
   constructor(g){
     this.g=g;this.group=new THREE.Group();g.scene.add(this.group);this.pos=this.group.position;
@@ -447,18 +497,14 @@ class Monster{
   buildBody(){
     this.bodyMat=this.voidMat(0);this.limbMat=this.voidMat(1);
     const add=(geo,mat)=>{const o=new THREE.Mesh(geo,mat);this.body.add(o);return o};
-    // elongated torso/neck/head silhouette
     const prof=[[0,1.0],[.13,1.02],[.16,1.18],[.12,1.5],[.15,1.75],[.23,2.02],[.21,2.28],[.09,2.38],[.05,2.47],[.1,2.56],[.13,2.7],[.11,2.84],[.06,2.93],[0,2.97]].map(([r,y])=>new THREE.Vector2(r,y));
     const torso=new THREE.LatheGeometry(prof,14);torso.scale(1,1,.62);
     add(torso,this.bodyMat);
-    // thin unnatural legs that liquefy into the floor
     for(const sx of[-1,1]){const l=new THREE.CylinderGeometry(.045,.1,1.12,8,14);l.translate(sx*.1,.56,0);add(l,this.bodyMat)}
-    // grotesquely long arms hanging almost to the floor + finger tendrils
     for(const sx of[-1,1]){
       const a=new THREE.CylinderGeometry(.06,.022,1.9,7,18);a.translate(0,-.95,0);a.rotateZ(sx*.09);a.translate(sx*.27,2.24,.02);add(a,this.limbMat);
       for(let f=0;f<3;f++){const t=new THREE.CylinderGeometry(.014,.002,rnd(.45,.65),5,8);t.translate(0,-t.parameters.height/2,0);t.rotateZ(sx*(.12+f*.06));t.rotateX((f-1)*.18);t.translate(sx*.45,.4,.02);add(t,this.limbMat)}
     }
-    // tendrils trailing from the back
     for(let i=0;i<5;i++){const t=new THREE.CylinderGeometry(.035,.004,rnd(1.4,2.1),6,16);t.translate(0,-t.parameters.height/2,0);t.rotateX(-rnd(.15,.45));t.rotateZ(rnd(-.4,.4));t.translate(rnd(-.15,.15),rnd(2.0,2.35),-.1);add(t,this.limbMat)}
   }
 
@@ -489,45 +535,9 @@ class Monster{
     this.dep||(this.dep=new Int32Array(CFG.SIZE*CFG.SIZE));
     $('danger').style.opacity=0;
   }
-  // ---- camera flash / snapshot: freeze, hiss, vanish into the dark ----
-  onFlash(camDir){
-    if(!this.active||this.mode==='bloodlust')return;
-    const g=this.g,c=g.camera.position,d=this.dist();if(d>26)return;
-    g.camera.getWorldDirection(FWD);
-    V3.set(this.pos.x-c.x,0,this.pos.z-c.z).normalize();
-    const facing=V3.x*FWD.x+V3.z*FWD.z; // in the flash cone?
-    if(facing<.55&&d>4)return; // too far off-axis to catch it
-    if(d<26&&!g.world.los(c.x,c.z,this.pos.x,this.pos.z))return;
-    this.freeze=Math.max(this.freeze,1);this.g.audio.hiss(this.pos);
-    this.g.goo.pool(this.pos.x,this.pos.z,1.4);
-    this.g.warn('IT HATES THE LIGHT',1200);
-  }
-  // ---- battery dead: no body, only eyes, faster than you ----
-  enterBloodlust(){
-    const g=this.g,w=g.world,c=g.camera.position,pc=w.cell(c.x,c.z);
-    const first=!this.active; if(first){this.reset();this.active=true;this.group.visible=true;this.pos.set((pc.x+2)*CFG.CELL,0,pc.y*CFG.CELL);}
-    this.mode='bloodlust';this.blood=0;this.path.length=0;this.freeze=0;
-    this.lastGoo.copy(this.pos);
-    this.flood(pc.x,pc.y);
-    if(first||this.dist()>9)this.placeBehind(6);
-    g.audio.roar(this.pos);
-  }
-  placeBehind(dist){
-    const c=this.g.camera.position,w=this.g.world;this.flood(w.cell(c.x,c.z).x,w.cell(c.x,c.z).y);
-    this.g.camera.getWorldDirection(FWD);
-    this.search(12,(id,depth,X,Z)=>{
-      if(w.los(c.x,c.z,X,Z))return -Infinity;
-      V3.set(X-c.x,0,Z-c.z).normalize();
-      const behind=-(V3.x*FWD.x+V3.z*FWD.z);
-      return behind*6+clamp((dist-depth)/2,-4,4)+Math.random();
-    });
-    if(this.path.length){const t=this.path[this.path.length-1];this.pos.set((t/w.n|0)*CFG.CELL,0,(t%w.n)*CFG.CELL);this.path.length=0}
-  }
-
   dist(){const c=this.g.camera.position;return Math.hypot(this.pos.x-c.x,this.pos.z-c.z)}
   openCount(x,y){const G=this.g.world.grid;let k=0;for(const[dx,dy]of DIRS)if(G[x+dx]?.[y+dy]===T.FLOOR)k++;return k}
 
-  // BFS path-distance map from the player's cell (in cells)
   flood(cx,cy){
     const w=this.g.world,n=w.n,D=this.distMap,q=this.q;D.fill(-1);
     let h=0,t=0;const s=cx*n+cy;D[s]=0;q[t++]=s;
@@ -537,7 +547,6 @@ class Monster{
     }
   }
 
-  // BFS from the monster; picks the best-scoring reachable cell and stores the path to it
   search(maxDepth,score,avoid=0){
     const w=this.g.world,n=w.n,prev=this.prev,q=this.q,dep=this.dep,D=this.distMap,m=w.cell(this.pos.x,this.pos.z);
     prev.fill(-1);const s=m.x*n+m.y;let h=0,t=0,best=-1,bestS=-Infinity;q[t++]=s;prev[s]=s;dep[s]=0;
@@ -554,318 +563,51 @@ class Monster{
     let cur=best;while(cur!==s){this.path.push(cur);cur=prev[cur]}this.path.reverse();return true;
   }
 
-  spawn(){
-    const g=this.g,c=g.camera.position,w=g.world,pc=w.cell(c.x,c.z);this.flood(pc.x,pc.y);g.camera.getWorldDirection(FWD);
-    let best=null,bs=-Infinity;
-    for(let x=1;x<w.n-1;x++)for(let y=1;y<w.n-1;y++){
-      if(w.grid[x][y]!==T.FLOOR)continue;
-      const X=x*CFG.CELL,Z=y*CFG.CELL,ex=X-c.x,ez=Z-c.z,e=Math.hypot(ex,ez),pd=this.distMap[x*w.n+y];
-      if(e<20||e>32||pd<5||w.los(c.x,c.z,X,Z))continue;
-      let s=Math.random()*10-Math.max(0,pd-12);if((ex*FWD.x+ez*FWD.z)/e<0)s+=8;
-      if(s>bs){bs=s;best={X,Z}}
-    }
-    if(!best){this.respawn=2;return}
-    this.reset();this.active=true;this.group.visible=true;
-    this.pos.set(best.X,0,best.Z);this.lastGoo.copy(this.pos);
-    this.group.rotation.y=Math.atan2(c.x-this.pos.x,c.z-this.pos.z);
-    this.enterStalk(rnd(1,3));this.peekCD=rnd(10,20);
-    g.goo.pool(this.pos.x,this.pos.z,1);
-  }
-
-  /* ---------- phase transitions ---------- */
-  enterStalk(linger=0){
-    this.mode='stalk';this.path.length=0;this.travelling=false;this.peeking=false;
-    this.lingerT=linger;this.lingerAcc=0;this.pooled=false;this.pathT=0;
-  }
-
-  // Phase 2: burst laterally across / behind a corner, never straight at the player
-  enterDart(){
-    const c=this.g.camera.position,w=this.g.world,mx=this.pos.x-c.x,mz=this.pos.z-c.z,ml=Math.hypot(mx,mz)||1;
-    const ok=this.search(4,(id,depth,X,Z)=>{
-      if(w.los(c.x,c.z,X,Z))return -Infinity;
-      const ex=X-this.pos.x,ez=Z-this.pos.z,el=Math.hypot(ex,ez)||1,dot=(ex*mx+ez*mz)/(el*ml);
-      if(dot<-.5)return -Infinity;
-      return (1-Math.abs(dot))*6-depth*1.5+Math.random();
-    });
-    if(!ok){this.enterRetreat(false);return}
-    this.g.goo.pool(this.pos.x,this.pos.z,.7);
-    this.mode='dart';this.dartCD=rnd(7,12);this.seenT=0;this.peeking=false;this.lingerT=0;this.travelling=false;
-    this.g.audio.whoosh(this.pos);
-  }
-
-  // Phase 3: flee to the nearest hidden cell, away from the player
-  enterRetreat(agony=true){
-    const c=this.g.camera.position,w=this.g.world,D=this.distMap,mc=w.cell(this.pos.x,this.pos.z),md=Math.max(0,D[mc.x*w.n+mc.y]);
-    if(!this.search(10,(id,depth,X,Z)=>w.los(c.x,c.z,X,Z)?-Infinity:(D[id]-md)*2-depth*.5+Math.random()*2,2))
-      this.search(10,(id,depth)=>D[id]-md-depth*.2);
-    this.mode='retreat';this.agonyT=agony?rnd(.4,.6):0;this.travelling=false;this.peeking=false;this.lingerT=0;this.seenT=0;
-    if(agony){this.g.audio.screech(this.pos);this.g.glitch()}
-  }
-
-  // Phase 4: drop all stealth
-  enterStrike(){
-    this.mode='strike';this.lostT=0;this.pathT=0;this.path.length=0;this.peeking=false;this.lingerT=0;
-    this.g.audio.roar(this.pos);this.g.glitch();this.g.warn('IT SEES YOU',1400);
-  }
-  // ---- lure: stand at the far end of a sightline, perfectly still ----
-  enterLure(){
-    const g=this.g,c=g.camera.position,w=g.world;
-    const ok=this.search(25,(id,depth,X,Z)=>{
-      const e=Math.hypot(X-c.x,Z-c.z);
-      if(e<13||e>18||!w.los(c.x,c.z,X,Z))return -Infinity;
-      // must be down a clear line with room behind it to slink around
-      let hall=0;for(const[dx,dy]of DIRS)if(w.grid[(X/CFG.CELL|0)+dx]?.[(Z/CFG.CELL|0)+dy]===T.FLOOR)hall++;
-      if(hall<3)return -Infinity;
-      return -Math.abs(e-15)*.5+Math.random()*3;
-    });
-    if(!ok)return false;
-    const t=this.path[this.path.length-1];this.pos.set((t/w.n|0)*CFG.CELL,0,(t%w.n)*CFG.CELL);this.lastGoo.copy(this.pos);
-    this.mode='lure';this.lureT=rnd(10,16);this.path.length=0;this.travelling=false;this.peeking=false;this.lingerT=1;this.speed=0;return true;
-  }
-  // ---- back-stalk: silently route directly behind the player, THUD ----
-  enterBackStalk(){
-    const g=this.g,c=g.camera.position,w=g.world;
-    g.camera.getWorldDirection(FWD);
-    const dest=V3.set(FWD.x*-1.9,0,FWD.z*-1.9);
-    const tx=c.x+dest.x,tz=c.z+dest.z;
-    const cell=w.cell(tx,tz);if(cell.x<0||cell.x>=w.n||cell.y<0||cell.y>=w.n)return;
-    if(w.grid[cell.x][cell.y]!==T.FLOOR||w.los(c.x,c.z,tx,tz))return;
-    const was=this.pos.clone();
-    this.pos.set(tx,0,tz);this.lastGoo.copy(was);
-    this.mode='backStalk';this.pathT=1.1;this.spinT=0;this.peeking=false;this.lingerT=0;this.seenT=0;this.litT=0;
-    this.dir.set(c.x-this.pos.x,0,c.z-this.pos.z).normalize();
-    this.travelling=false;this.path.length=0;
-    g.audio.thud(c,true);
-  }
-
-  /* ---------- phase 1: phantom stalker ---------- */
-  findStalkSpot(){
-    const c=this.g.camera.position,w=this.g.world,D=this.distMap;
-    return this.search(60,(id,depth,X,Z)=>{
-      const pd=D[id];if(pd<4||pd>9)return -Infinity;
-      const ex=X-c.x,ez=Z-c.z,e=Math.hypot(ex,ez);if(e<14||w.los(c.x,c.z,X,Z))return -Infinity;
-      let s=-Math.abs(pd-6)*3-depth*.6+Math.random()*4;
-      if((ex*FWD.x+ez*FWD.z)/e<-.2)s+=6;
-      return s;
-    },3);
-  }
-
-  // occasionally ease into a long sightline beyond the fog and just... stand there
-  findPeek(){
-    const c=this.g.camera.position,w=this.g.world;
-    return this.search(30,(id,depth,X,Z)=>{
-      const e=Math.hypot(X-c.x,Z-c.z);if(e<20||e>30||!w.los(c.x,c.z,X,Z))return -Infinity;
-      return -depth+Math.random()*3;
-    },3);
-  }
-
-  stalk(dt){
-    const g=this.g;this.peekCD-=dt;
-    if(this.travelling&&!this.path.length){this.travelling=false;this.lingerT=this.peeking?rnd(3,6):rnd(.8,3);this.lingerAcc=0;this.pooled=false}
-    if(this.lingerT>0){
-      this.lingerT-=dt;this.lingerAcc+=dt;
-      if(!this.pooled&&this.lingerAcc>1.3){this.pooled=true;g.goo.pool(this.pos.x,this.pos.z,.8)}
-      if(this.lingerT>0)return;
-      this.peeking=false;
-    }
-    if(this.travelling&&!this.peeking&&(this.pathT-=dt)>0)return;
-    if(this.travelling&&this.peeking)return;
-    this.pathT=rnd(1.2,1.8);
-    if(this.peekCD<=0&&this.findPeek()){this.peeking=true;this.peekCD=rnd(18,32)}
-    else{this.peeking=false;this.findStalkSpot()}
-    this.travelling=this.path.length>0;
-    if(!this.travelling){this.lingerT=rnd(1,2);this.lingerAcc=0;this.pooled=true}
-  }
-
-  /* ---------- locomotion ---------- */
   stepBy(dx,dz){
     const w=this.g.world,p=this.pos,l=Math.hypot(dx,dz);if(l<1e-5)return;
     if(!w.collides(p.x+dx,p.z,.2))p.x+=dx;if(!w.collides(p.x,p.z+dz,.2))p.z+=dz;
     this.dir.x+=(dx/l-this.dir.x)*.25;this.dir.z+=(dz/l-this.dir.z)*.25;this.dir.normalize();
   }
-  move(dt,speed){
-    if(!this.path.length||speed<=0)return;
-    const w=this.g.world,id=this.path[0],tx=(id/w.n|0)*CFG.CELL,tz=(id%w.n)*CFG.CELL;
-    const dx=tx-this.pos.x,dz=tz-this.pos.z,d=Math.hypot(dx,dz);
-    if(d<.25){
-      this.path.shift();
-      // larger pooled slicks where it slinks around corners
-      if(this.path.length&&this.mode==='stalk'){
-        const nid=this.path[0],nx=(nid/w.n|0)*CFG.CELL-tx,nz=(nid%w.n)*CFG.CELL-tz,nl=Math.hypot(nx,nz)||1;
-        if((nx*this.dir.x+nz*this.dir.z)/nl<.5&&Math.random()<.45)this.g.goo.pool(this.pos.x,this.pos.z,.55);
-      }
-      return;
-    }
-    const s=Math.min(d,speed*dt)/d;this.stepBy(dx*s,dz*s);
-  }
-  chaseDirect(dt,speed){
-    const c=this.g.camera.position,dx=c.x-this.pos.x,dz=c.z-this.pos.z,d=Math.hypot(dx,dz)||1,s=Math.min(d,speed*dt)/d;
-    this.stepBy(dx*s,dz*s);
-  }
-
-  /* ---------- per-frame ---------- */
-    update(dt){
-    const g=this.g,a=g.audio;
-    if(!this.active){$('danger').style.opacity=0;if((this.respawn-=dt)<=0)this.spawn();return}
-    if((g.camCD-=dt)<0)g.camCD=0;
-    const c=g.camera.position,w=g.world,d=this.dist();
-    if(this.freeze>0){this.freeze-=dt;this.speed=0;this.animate(dt,true,d);if(this.freeze<=0)this.enterDart();return}
-    if(this.blood>0){this.blood=Math.max(0,this.blood-dt);if(!this.path.length&&d>1.2){const pc=w.cell(c.x,c.z);this.flood(pc.x,pc.y);this.search(30,id=>-Math.max(0,this.distMap[id])*10)}}
-    // dark: the body is gone, the eyes sprint at you
-    if(this.mode==='bloodlust'){
-      const speed=6.4; // faster than the player's 5.4 run
-      if(g.world.los(c.x,c.z,this.pos.x,this.pos.z))this.chaseDirect(dt,speed);
-      else{if((this.pathT-=dt)<=0){this.pathT=.15;
-        const pc=w.cell(c.x,c.z);this.flood(pc.x,pc.y);this.search(40,id=>-Math.max(0,this.distMap[id])*10)}this.move(dt,speed)}
-      this.speed+=(speed-this.speed)*Math.min(1,dt*8);
-      this.animate(dt,false,d,true);
-      $('danger').style.opacity=clamp((14-d)/12,0,1).toFixed(2);
-      if(d<1.1)g.killPlayer();return;
-    }
-    const pc=w.cell(c.x,c.z);
-    if((this.floodT-=dt)<=0||pc.x!==this.pcx||pc.y!==this.pcy){this.flood(pc.x,pc.y);this.pcx=pc.x;this.pcy=pc.y;this.floodT=.5}
-    g.camera.getWorldDirection(FWD);
-    const mc=w.cell(this.pos.x,this.pos.z),pathD=this.distMap[mc.x*w.n+mc.y];
-
-    // perception
-    V1.set(this.pos.x,2.2,this.pos.z);let lit=g.flash.hits(V1);if(!lit){V1.y=1.2;lit=g.flash.hits(V1)}
-    const los=w.los(c.x,c.z,this.pos.x,this.pos.z);
-    V3.set(this.pos.x-c.x,0,this.pos.z-c.z).normalize();
-    const facing=V3.x*FWD.x+V3.z*FWD.z,inView=los&&facing>.8;
-    if(lit)this.litT+=dt;else this.litT=Math.max(0,this.litT-dt*2);
-    if(inView&&!lit)this.seenT+=dt;else this.seenT=Math.max(0,this.seenT-dt);
-    this.dartCD-=dt;
-
-    // dead end check: player's cell has one exit and it's in the way
-    const trapped=this.openCount(pc.x,pc.y)<=1&&pathD>=0&&pathD<=3;
-    // straight-line walk -> the THUD behind you
-    const straightYaw=g.player.moving?g.camera.rotation.y:this.lastYaw;
-    const dYaw=Math.abs(Math.atan2(Math.sin(straightYaw-this.lastYaw),Math.cos(straightYaw-this.lastYaw)));
-    if(g.player.moving&&dYaw<.18){this.straightT+=dt;this.straightLen+=(g.player.running?.54:.30)*dt}
-    else if(!g.player.moving)this.straightT=Math.max(0,this.straightT-dt*2);
-    else{this.straightT=Math.max(0,this.straightT-dt);this.straightLen=this.straightLen*.7}
-    if(!g.player.moving)this.straightLen*=Math.pow(.5,dt);
-    this.lastYaw=straightYaw;
-    const bump=Math.random()<dt*.04; // luring chance
-    if(this.straightLen>4.5&&!g.dark&&g.player.controls.isLocked&&d>3&&this.mode==='stalk'){this.enterBackStalk();this.straightLen=0;this.straightT=0}
-    else if(bump&&this.mode==='stalk'&&!this.peeking&&d>6&&this.peekCD>0){this.enterLure()}
-
-    // ---- phase logic ----
-    let speed=0;
-    if(this.mode==='lure'){
-      this.lureT-=dt;
-      if(d<12&&los){ // player took the bait: vanish around a corner with a slick
-        this.g.goo.trail(this.pos.x,this.pos.z,this.dir.x,this.dir.z,clamp(.6,0,1));
-        this.g.goo.pool(this.pos.x,this.pos.z,.9);this.enterRetreat(false);
-      }else if(this.lureT<=0){this.enterStalk(rnd(1,2))}
-    }else if(this.mode==='backStalk'){
-      const behindT=(this.pathT-=dt);
-      if(behindT>0){
-        // planted behind the player, waiting for the spin
-        if(inView) this.spinT+=dt; else this.spinT=0;
-        if(this.spinT>.15){ // they looked
-          this.g.goo.pool(this.pos.x,this.pos.z,1);this.enterDart();
-        }
-      }else if(!this.path.length){this.g.goo.pool(this.pos.x,this.pos.z,.6);this.enterRetreat(false)}
-      else{ speed=7;this.move(dt,speed) }
-    }else if(this.mode==='strike'){
-      if(g.dark){this.enterBloodlust();return}
-      if(lit&&this.litT>.9&&d>2.5){this.enterRetreat(true)}
-      else{
-        if(!los&&d>6)this.lostT+=dt;else this.lostT=0;
-        if(this.lostT>3.5||d>22)this.enterStalk(rnd(1,2));
-        else{
-          speed=9.5;
-          if(los&&d<6)this.chaseDirect(dt,speed);
-          else{if((this.pathT-=dt)<=0){this.pathT=.2;this.search(40,id=>-Math.max(0,this.distMap[id])*10)}this.move(dt,speed)}
-        }
-      }
-    }else if(lit&&d>=6&&this.mode!=='retreat'){
-      this.enterRetreat(true);
-    }else if(this.mode==='retreat'?d<1.8:((d<5.5&&los)||(d<2.4)||(trapped&&d<12&&los))){
-      this.enterStrike();
-    }else if(this.mode==='retreat'){
-      this.agonyT-=dt;
-      if(this.agonyT>0)speed=0;else{speed=15;this.move(dt,speed)}
-      if(this.agonyT<=0&&!this.path.length)this.enterStalk(rnd(3,6));
-    }else if(this.mode==='dart'){
-      speed=24;this.move(dt,speed);
-      if(!this.path.length)this.enterStalk(rnd(2,4));
-    }else{
-      // stalk
-      if(inView&&d>9&&this.seenT>(this.peeking?.6:.25)&&this.dartCD<=0)this.enterDart();
-      else if(inView&&d>9&&this.seenT>1.6)this.enterRetreat(false);
-      else{
-        this.stalk(dt);
-        if(this.travelling){speed=this.peeking?1.1:(los?1.4:2.8);this.move(dt,speed)}
-      }
-    }
-    this.speed+=(speed-this.speed)*Math.min(1,dt*8);
-
-    // goo trail behind it
-    const moved=this.lastGoo.distanceTo(this.pos);
-    if(moved>(this.speed>10?1.6:.9)){
-      g.goo.trail(this.pos.x,this.pos.z,this.dir.x,this.dir.z,clamp(this.speed/12,0,1.5));
-      this.lastGoo.copy(this.pos);
-    }
-
-    // audio cues (stealthy during stalk)
-    if(this.mode==='strike'&&Math.random()<dt*3.5)a.monsterStep(this.pos,d);
-    if(this.mode==='stalk'&&d<16&&Math.random()<dt*.02)a.whisper(this.pos,d);
-
-    this.animate(dt,lit,d);
-
-    const danger=this.mode==='strike'?clamp((14-d)/12,0,1)*.85:0;
-    $('danger').style.opacity=danger.toFixed(2);
-    if(this.mode==='strike'&&d<1.1)g.killPlayer();
-  }
-
   animate(dt,lit,d,eyesOnly=false){
     const g=this.g,c=g.camera.position;this.t+=dt;
-    const m=this.mode,agony=m==='retreat'&&this.agonyT>0,fast=this.speed>8;
-    // face movement, or the player when still
-    const yaw=this.speed>.5?Math.atan2(this.dir.x,this.dir.z):Math.atan2(c.x-this.pos.x,c.z-this.pos.z);
+    const m=this.mode,agony=m==='retreat'&&this.agonyT>0,fast=this.speed>4;
+    const yaw=Math.atan2(this.dir.x,this.dir.z);
     let dy=yaw-this.group.rotation.y;dy=Math.atan2(Math.sin(dy),Math.cos(dy));this.group.rotation.y+=dy*Math.min(1,dt*(fast?12:3));
 
-    // shader warp: slow liquid sway at rest, violent shudder in agony / strike
     this.U.uTime.value=this.t;
-    this.U.uWarp.value+=((m==='strike'?2.2:fast?1.6:1)-this.U.uWarp.value)*Math.min(1,dt*4);
-    this.U.uShudder.value+=((agony?3:lit?1.6:m==='strike'?.8:0)-this.U.uShudder.value)*Math.min(1,dt*10);
+    this.U.uWarp.value+=((m==='CHASE'?2.2:fast?1.6:1)-this.U.uWarp.value)*Math.min(1,dt*4);
+    this.U.uShudder.value+=((agony?3:lit?1.6:m==='CHASE'?.8:0)-this.U.uShudder.value)*Math.min(1,dt*10);
 
-    // body posture: hunched forward lunge when sprinting, elongated stretch while lingering
-    const lean=fast?.42:m==='strike'?.3:0;
+    const lean=fast?.42:m==='CHASE'?.3:0;
     this.body.rotation.x+=(lean-this.body.rotation.x)*Math.min(1,dt*6);
     const stretch=1+.06*Math.sin(this.t*.53)+(this.lingerT>0?.08:0);
     this.body.scale.set(1/Math.sqrt(stretch),stretch,1/Math.sqrt(stretch));
     if(agony){this.body.position.set(rnd(-.09,.09),rnd(-.03,.03),rnd(-.09,.09));this.body.rotation.z=rnd(-.12,.12)}
     else{this.body.position.multiplyScalar(.8);this.body.rotation.z=Math.sin(this.t*.8)*.04}
 
-    // visibility: always a near-silhouette; vanishes into the fog when far / stalking
-    let vis=m==='strike'?1:m==='bloodlust'?0:m==='backStalk'?1:m==='dart'?.85:agony?1:m==='lure'?1:m==='retreat'?.75:this.peeking?.7:.55;
+    let vis=m==='CHASE'?1:m==='bloodlust'?0:m==='backStalk'?1:m==='dart'?.85:agony?1:m==='lure'?1:m==='retreat'?.75:this.peeking?.7:.55;
     vis*=clamp((36-d)/14,0,1);
     const flick=fast?(Math.random()<.35?.35:1):1;
     this.bodyMat.opacity=this.limbMat.opacity=vis*flick*.96;
 
-    // smoke shroud: billboard puffs that rise, swell and dissipate, streaming behind when fast
     for(const s of this.puffs){
       const u=s.userData;u.life+=dt/u.dur;
       if(u.life>=1){u.life-=1;u.a=rnd(0,Math.PI*2);u.r=rnd(.05,.55);u.y0=rnd(0,2.6)}
       const L=u.life,trail=fast?L*1.4:0;
       s.position.set(Math.cos(u.a)*u.r*(1+L*.6),u.y0+L*u.rise,Math.sin(u.a)*u.r*(1+L*.6)-trail);
-      s.scale.setScalar(u.size*(.6+L*.9)*(m==='strike'?1.3:1));
+      s.scale.setScalar(u.size*(.6+L*.9)*(m==='CHASE'?1.3:1));
       s.material.rotation+=u.spin*dt;
       s.material.opacity=Math.sin(L*Math.PI)*.62*vis;
     }
 
-    // eyes: pinpoint embers that flare in the beam, faintly peer when lingering
     V2.set(c.x-this.pos.x,0,c.z-this.pos.z).normalize();
     const facing=V2.x*Math.sin(this.group.rotation.y)+V2.z*Math.cos(this.group.rotation.y);
     let eye=0;
     if(eyesOnly)eye=.95+Math.random()*.05;
     else if(lit)eye=.85+Math.random()*.15;
-    else if(m==='strike')eye=.7+Math.random()*.3;
+    else if(m==='CHASE')eye=.7+Math.random()*.3;
     else if((this.lingerT>0||this.peeking)&&facing>.3)eye=.22+.08*Math.sin(this.t*3.1);
-    if(Math.sin(this.t*.9)>.985)eye*=.1; // blink
+    if(Math.sin(this.t*.9)>.985)eye*=.1;
     this.eyeMat.opacity+=(eye*clamp((40-d)/18,0,1)-this.eyeMat.opacity)*Math.min(1,dt*(lit?20:5));
     const es=.12+(lit?.12:0)+d*.006;for(const e of this.eyes)e.scale.setScalar(es);
   }
@@ -882,7 +624,6 @@ class Audio{
     const lfo=x.createOscillator();lfo.frequency.value=.13;const lg=x.createGain();lg.gain.value=70;lfo.connect(lg);lg.connect(filt.frequency);lfo.start();
     [55,110,220.5].forEach((f,i)=>{const o=x.createOscillator();o.type=i?'triangle':'sawtooth';o.frequency.value=f;o.detune.value=(i-1)*6;const gg=x.createGain();gg.gain.value=.5/(i+1);o.connect(gg);gg.connect(filt);o.start()});
     const b=x.createOscillator();b.type='square';b.frequency.value=120;this.buzz=x.createGain();this.buzz.gain.value=.012;b.connect(this.buzz);this.buzz.connect(this.master);b.start();
-    // room/hall reverb bus: dry -> master, wet convolver -> master
     this.verbGain=x.createGain();this.verbGain.gain.value=1;this.verbGain.connect(this.master);
     this.verb=x.createConvolver();this.verbSend=x.createGain();this.verbSend.gain.value=.5;
     this.verb.connect(this.verbSend);this.verbSend.connect(this.master);
@@ -919,9 +660,9 @@ class Audio{
   footstep(){
     if(!this.ctx||this.powerOut&&false)return;
     const x=this.ctx,t=x.currentTime,s=x.createBufferSource(),f=x.createBiquadFilter(),g=x.createGain();
-    s.buffer=this.stepBuf;s.playbackRate.value=rnd(.85,1.15); // pitch variation
+    s.buffer=this.stepBuf;s.playbackRate.value=rnd(.85,1.15);
     f.type='lowpass';f.frequency.value=rnd(650,950);
-    g.gain.setValueAtTime(rnd(.2,.3),t); // volume variation
+    g.gain.setValueAtTime(rnd(.2,.3),t);
     g.gain.exponentialRampToValueAtTime(.0001,t+.2);
     s.connect(f);f.connect(g);this.routeGain(g,!this.powerOut,clamp(this.roomAmt,.1,.55));s.start(t);s.stop(t+.22);
   }
@@ -948,21 +689,7 @@ class Audio{
   distant(){if(!this.ctx)return;const a=rnd(0,Math.PI*2),c=this.g.camera.position;V3.set(c.x+Math.cos(a)*30,0,c.z+Math.sin(a)*30);Math.random()<.5?this.monsterStep(V3,30):this.tone(rnd(70,110),1.4,.06,'triangle',V3)}
   setStress(s){if(!this.ctx)return;this.buzz.gain.setTargetAtTime(.012+s*.05,this.ctx.currentTime,.1)}
   silence(on){if(!this.ctx)return;this.master.gain.cancelScheduledValues(this.ctx.currentTime);this.master.gain.setTargetAtTime(on?0:.9,this.ctx.currentTime,on?.05:.8)}
-  update(dt){
-    if(!this.ctx)return;
-    const p=this.g.player;this.stepT-=dt;
-    if(p.moving&&this.stepT<=0){this.footstep();this.stepT=(p.running?.34:.5)*rnd(.85,1.2)}
-    if(!p.moving)this.stepT=Math.min(this.stepT,.05);
-    // corridor = narrow/muffled, open room = long wet reverb
-    const w=this.g.world,c=this.g.world.cell(this.g.camera.position.x,this.g.camera.position.z);
-    let open=0;for(let x=c.x-3;x<=c.x+3;x++)for(let y=c.y-3;y<=c.y+3;y++)if(w.grid[x]?.[y]===T.FLOOR)open++;
-    const target=open>34?.75:open>22?.45:.12;
-    this.roomAmt+=(target-this.roomAmt)*Math.min(1,dt*2);
-    if(this.powerOut)return;
-    this.verb.buffer=open>22?this.ir.room:this.ir.hall;
-    this.verbSend.gain.value=open>22?.8:.28;
-  }
-  // floodlamps dying: pitch-down whine + clunk + everything cuts out
+  
   powerDown(){
     if(!this.ctx)return;this.powerOut=true;const x=this.ctx,t=x.currentTime;
     const o=x.createOscillator(),g=x.createGain();o.type='sawtooth';o.frequency.setValueAtTime(420,t);o.frequency.exponentialRampToValueAtTime(28,t+.9);
@@ -973,7 +700,6 @@ class Audio{
     this.verbSend.gain.setTargetAtTime(0,t,.05);
   }
   restore(){if(!this.ctx)return;this.powerOut=false;const t=this.ctx.currentTime;this.master.gain.setTargetAtTime(.9,t,.2);this.hum.gain.setTargetAtTime(.11,t,.2);this.buzz.gain.setTargetAtTime(.012,t,.2);this.verbSend.gain.setTargetAtTime(.3,t,.2)}
-  // the kill: distorted high shriek + sub-drop, clipping, then silence
   killScream(){
     if(!this.ctx)return;const x=this.ctx,t=x.currentTime;
     const bus=x.createGain();bus.gain.value=.9;const ws=x.createWaveShaper();ws.curve=this.clipCurve();ws.oversample='4x';
@@ -1006,20 +732,46 @@ class Audio{
     const s=x.createBufferSource(),lp=x.createBiquadFilter(),sg=x.createGain();s.buffer=this.stepBuf;lp.type='lowpass';lp.frequency.value=420;sg.gain.setValueAtTime(.4,t);sg.gain.exponentialRampToValueAtTime(.0001,t+.16);s.connect(lp);lp.connect(sg);if(near)sg.connect(this.master);else this.spatial(sg,pos,1,2);s.start(t);s.stop(t+.18);
   }
   jumpIntro(){this.tone(60,.5,.3,'sine');this.tone(1200,.1,.08,'sawtooth')}
+  update(dt){
+    if(!this.ctx)return;
+    const p=this.g.player;this.stepT-=dt;
+    if(p.moving&&this.stepT<=0){this.footstep();this.stepT=(p.running?.34:.5)*rnd(.85,1.2)}
+    if(!p.moving)this.stepT=Math.min(this.stepT,.05);
+    const w=this.g.world,c=this.g.world.cell(this.g.camera.position.x,this.g.camera.position.z);
+    let open=0;for(let x=c.x-3;x<=c.x+3;x++)for(let y=c.y-3;y<=c.y+3;y++)if(w.grid[x]?.[y]===T.FLOOR)open++;
+    const target=open>34?.75:open>22?.45:.12;
+    this.roomAmt+=(target-this.roomAmt)*Math.min(1,dt*2);
+    if(this.powerOut)return;
+    this.verb.buffer=open>22?this.ir.room:this.ir.hall;
+    this.verbSend.gain.value=open>22?.8:.28;
+  }
 }
 
 class Game{
   constructor(){
     this.renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.25));this.renderer.setSize(innerWidth,innerHeight);this.renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.prepend(this.renderer.domElement);
+    // OPTIMIZATION: Lock to true 1:1 CSS native resolution to prevent super-sampling lag
+    this.performanceMode = false;
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(innerWidth,innerHeight);
+    this.renderer.outputColorSpace=THREE.SRGBColorSpace;
+    document.body.prepend(this.renderer.domElement);
+    
     this.scene=new THREE.Scene();this.scene.background=new THREE.Color(CFG.FOG[0]);this.scene.fog=new THREE.Fog(...CFG.FOG);
-    this.camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,90);this.scene.add(this.camera);
+    // Match the camera's far clipping plane (45) closely to the Fog's max distance (40)
+    this.camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05, CFG.FOG[2] + 5);
+    this.scene.add(this.camera);
     buildMaterials();
     this.level=-1;this.dead=false;this.dark=false;this.camCD=0;this.sayT=0;this.recT=0;this.distT=rnd(20,40);this.trackY=-10;
-    this.goo=new GooTrail(this.scene);this.audio=new Audio(this);this.lighting=new Lighting(this.scene);this.player=new Player(this);this.flash=new Flashlight(this);this.monster=new Monster(this);
+    this.goo = new GooTrail(this.scene);
+    this.audio = new Audio(this);
+    this.lighting = new Lighting(this.scene);
+    this.player = new Player(this);
+    this.stressSystem = new StressSystem(this.player);
+    this.flash = new Flashlight(this);
+    this.monster = new (createMonsterAI(Monster, THREE, CFG))(this);
     this.newLevel();this.mp=new Multiplayer(this);
-    // ONE authoritative world state: reuse the instance Multiplayer already
-    // wired to the network instead of creating a second, dead copy.
+    
     this.share=this.mp.share;
     const start=$('start'),c=this.player.controls;
     if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
@@ -1040,14 +792,102 @@ class Game{
       if (!document.fullscreenElement) document.documentElement.requestFullscreen();
       else document.exitFullscreen();
     });
+
+    const perfButton = $('performance-btn');
+    perfButton?.addEventListener('click', () => {
+      this.setPerformanceMode(!this.performanceMode);
+    });
   }
+
+  resize(){
+    this.camera.aspect = innerWidth / Math.max(1, innerHeight);
+    this.camera.updateProjectionMatrix();
+    // setPixelRatio remains whatever the selected performance mode requires.
+    this.renderer.setSize(innerWidth, innerHeight);
+  }
+
+  setPerformanceMode(enabled){
+    this.performanceMode = !!enabled;
+    document.body.classList.toggle('performance-mode', this.performanceMode);
+
+    // 1. DYNAMIC RENDER DISTANCE (The biggest performance saver)
+    if (this.performanceMode) {
+      this.scene.fog.far = 22; // Pull fog aggressively close
+      this.camera.far = 25;    // GPU completely ignores the maze past 25 units
+    } else {
+      this.scene.fog.far = CFG.FOG[2];  // Restore normal fog (40)
+      this.camera.far = CFG.FOG[2] + 5; // Restore normal render distance (45)
+    }
+    this.camera.updateProjectionMatrix();
+
+    // 2. RESOLUTION SCALING
+    const ratio = this.performanceMode
+      ? Math.min(window.devicePixelRatio || 1, 0.75)
+      : 1;
+    this.renderer.setPixelRatio(ratio);
+    this.renderer.setSize(innerWidth, innerHeight, false);
+
+    // 3. TEXTURE FILTERING
+    const maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const anisotropy = this.performanceMode ? 1 : Math.min(4, maxAnisotropy);
+    this.scene.traverse(obj => {
+      const materials = Array.isArray(obj.material)
+        ? obj.material
+        : (obj.material ? [obj.material] : []);
+      for (const material of materials) {
+        if (material.map) material.map.anisotropy = anisotropy;
+      }
+    });
+
+    const button = $('performance-btn');
+    if (button) {
+      button.textContent = this.performanceMode ? 'PERFORMANCE: ON' : 'PERFORMANCE: OFF';
+      button.setAttribute('aria-pressed', String(this.performanceMode));
+      button.title = this.performanceMode
+        ? 'Performance mode enabled — click to restore graphics'
+        : 'Reduce graphics for smoother performance';
+    }
+  }
+
+  _isInsideLargeRoom(px, pz){
+    if (!this.world) return false;
+    const c = this.world.cell(px, pz);
+    // Use the maze generator's actual large-room rectangles, not a density
+    // guess. Random maze branches can make a corridor look "open" to a counter.
+    return this.world.largeRooms.some(([x, y, w, h]) =>
+      c.x >= x && c.x < x + w && c.y >= y && c.y < y + h
+    );
+  }
+
+  _setSpawnCameraFov(){
+    this._inHallway = !this._isInsideLargeRoom(this.camera.position.x, this.camera.position.z);
+    this.camera.fov = this._inHallway ? 52 : 75;
+    this.camera.updateProjectionMatrix();
+  }
+
+  _updateCameraZoom(dt){
+    // Room membership comes from the generated maze's real room bounds, so
+    // corridor branches cannot fool the detector. Keep transitions smooth.
+    this._inHallway = !this._isInsideLargeRoom(this.camera.position.x, this.camera.position.z);
+    const targetFOV = this._inHallway ? 52 : 75;
+    const blend = 1 - Math.exp(-8 * Math.max(0, dt));
+    if (Math.abs(this.camera.fov - targetFOV) > 0.02) {
+      this.camera.fov += (targetFOV - this.camera.fov) * blend;
+      this.camera.updateProjectionMatrix();
+    } else if (this.camera.fov !== targetFOV) {
+      this.camera.fov = targetFOV;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
   newLevel(seed){
     this.level++;this.world?.dispose();this.goo.clear();
-    // co-op: seed Math.random only while the maze + fixtures are built so every peer gets the same map
     const mr=Math.random;if(seed!=null)Math.random=mulberry32(seed);
     let data;try{data=new Maze(CFG.SIZE).generate();this.world=new World(this.scene,data)}finally{Math.random=mr}
     this.lighting.setWorld(this.world);this.monster.reset();
-    this.camera.position.set(data.spawn.x*CFG.CELL,CFG.EYE,data.spawn.y*CFG.CELL);this.flash.battery=Math.max(this.flash.battery,.6);
+    this.camera.position.set(data.spawn.x*CFG.CELL,CFG.EYE,data.spawn.y*CFG.CELL);
+    this._setSpawnCameraFov();
+    this.flash.battery=Math.max(this.flash.battery,.6);
     this.dark=false;this.camCD=0;this.flash.on=true;this.audio.restore();$('dark').style.opacity=0;
     this.lighting.setDark(false);this.scene.background.set(CFG.FOG[0]);this.scene.fog.color.set(CFG.FOG[0]);
     $('level').textContent=this.level;$('danger').style.opacity=0;this.say(this.level?'THE LEVEL CHANGED.':'NO SIGNAL.');
@@ -1061,12 +901,8 @@ class Game{
     const f=$('flash');f.style.transition='none';f.style.opacity=1;requestAnimationFrame(()=>{f.style.transition='opacity .45s';f.style.opacity=0});
     this.monster.onFlash();
   }
-  // battery at 0%: lights die, dynamo dies, eyes come for you
-  // `remote` = a peer's battery died; this machine is only applying the event,
-  // so it must not re-broadcast it (no loops) and must not touch its monster.
   blackout(remote){
     if(this.dark||this.dead)return;this.dark=true;
-    // a real, shared world event: everybody's lights die, not just mine
     if(!remote&&this.share?.on)this.share.world('power');
     this.audio.click();this.audio.powerDown();
     for(const l of this.lighting.pool)l.intensity=0;this.lighting.setDark(true);
@@ -1074,15 +910,11 @@ class Game{
     this.flash.spot.intensity=0;this.flash.fill.intensity=0;
     $('dark').style.opacity=.35;
     this.warn('POWER FAILURE — RUN',2500);this.glitch();
-    // only the host's monster is real: a client leaves it to the snapshot
     if(!remote||!this.share?.on||this.share.host)this.monster.enterBloodlust();
   }
   killPlayer(){
     if(this.dead)return;
     this.dead=true;this.player.controls.unlock();
-    // shared world: only the host's copy of the monster is the real one, so a
-    // client does not get to hide/stop it — it just stops being a hunter here.
-    // the network layer also stops drawing the mirrored body for dead peers.
     if(!this.share?.on||this.share.host){this.monster.active=false;this.monster.group.visible=false}
     else this.share.hide();
     const j=$('jumpscare');j.classList.remove('active');void j.offsetWidth;j.classList.add('active');
@@ -1094,66 +926,96 @@ class Game{
     $('jumpscare').classList.remove('active');this.dead=false;this.dark=false;this.newLevel(seed);this.audio.restore();this.audio.silence(false);$('dark').style.opacity=0;$('start').classList.remove('hidden');
   }
   update(dt){
-    if(this.dead)return;
-    this.player.update(dt);this.flash.update(dt);
-    // ONE authoritative world: in co-op only the host runs the monster AI.
-    // a client's body is driven by the host snapshot in NetworkWorld.update().
+    if(this.dead){if(this.share?.on&&this.share.host)this.monster.update(dt);return}
+    this.player.update(dt);
+    this.flash.update(dt);
+    this.stressSystem.update(dt); // <-- ADD THIS
+    if(this.share?.on&&!this.share.host)this.camCD=Math.max(0,this.camCD-dt);
     if(!this.share?.on||this.share.host)this.monster.update(dt);
     this.lighting.update(dt,this.camera.position,this.monster);this.audio.update(dt);
     if(!this.dark)this.audio.setStress(this.lighting.maxStress);
     if(this.player.controls.isLocked&&(this.distT-=dt)<=0&&!this.dark){this.audio.distant();this.distT=rnd(25,60)}
   }
-  /* ==================================================================
-     NETWORK WORLD HOOKS
-     game.js keeps its own simulation; these two helpers are what the
-     network layer reads (host -> monsterEuler) and writes
-     (client -> monsterFace).  Nothing else about the AI changes.
-     ================================================================== */
-  // the monster's authoritative facing, in the same convention as Monster.animate
   monsterEuler(m = this.monster) {
     const c = this.camera.position;
-    const yaw = m.speed > .5 ? Math.atan2(m.dir.x, m.dir.z) : Math.atan2(c.x - m.pos.x, c.z - m.pos.z);
+    const yaw = m.group.rotation.y;
     return {x: m.body ? m.body.rotation.x : 0, y: yaw};
   }
-  // client side: rotate the mirrored body toward the host's reported heading
   monsterFace(yaw, pitch, glide = yaw) {
     const m = this.monster;
     m.group.rotation.y = glide;
     if (m.body) m.body.rotation.x = pitch;
   }
-  // host side: the monster caught someone.  their own machine runs the
-  // jumpscare + spectate flow; the host only rebroadcasts the roster change.
   onPlayerDeath(id) {
     const mp = this.mp;
     if (!mp?.coop || !mp.isHost || !id || id === mp.peer?.id) return;
-    if (id === 'local') return; // legacy client fallback, nobody to update
+    if (id === 'local') return;
     mp.setAlive(id, false);
     mp.broadcast({t: 'player-death', id});
   }
+
+  // OPTIMIZATION 1: Killed the DOM Thrashing (Stops the CPU from dying)
   hud(dt){
-    this.recT+=dt;const s=this.recT|0;this.clockEl.textContent=[s/3600|0,(s/60|0)%60,s%60].map(v=>String(v).padStart(2,'0')).join(':');
-    const c=this.world.cell(this.camera.position.x,this.camera.position.z);this.coords.textContent=String(c.x).padStart(3,'0')+','+String(c.y).padStart(3,'0');
+    this.recT+=dt;const s=this.recT|0;
+    if (this._lastS !== s) {
+      this.clockEl.textContent=[s/3600|0,(s/60|0)%60,s%60].map(v=>String(v).padStart(2,'0')).join(':');
+      this._lastS = s;
+    }
+    const c=this.world.cell(this.camera.position.x,this.camera.position.z);
+    if (!this._lastC || this._lastC.x !== c.x || this._lastC.y !== c.y) {
+      this.coords.textContent=String(c.x).padStart(3,'0')+','+String(c.y).padStart(3,'0');
+      this._lastC = c;
+    }
     const m=this.monster,d=m.active?m.dist():99;
-    // stalking is silent to the sensors; only overt actions register
-    const detected=m.active&&m.mode==='strike';
-    if(detected)this.status.textContent='AUDIO: MOVEMENT DETECTED';
-    else if(m.active&&m.mode==='dart'&&d<30)this.status.textContent='AUDIO: SIGNAL DISTORTION';
-    else if(m.active&&m.mode==='retreat'&&d<30)this.status.textContent='AUDIO: ELECTRICAL INTERFERENCE';
-    else if(this.lighting.maxStress>.3)this.status.textContent='AUDIO: ELECTRICAL INTERFERENCE';
-    else this.status.textContent='AUDIO: LOW HUM';
-    this.trackY=(this.trackY+dt*(60+(detected?240:0)))%(innerHeight+20);this.track.style.transform=`translateY(${this.trackY}px)`;
+    const detected=m.active&&m.mode==='CHASE';
+    
+    let st = 'AUDIO: LOW HUM';
+    if(detected) st='AUDIO: MOVEMENT DETECTED';
+    else if(m.active&&m.mode==='dart'&&d<30) st='AUDIO: SIGNAL DISTORTION';
+    else if(m.active&&m.mode==='retreat'&&d<30) st='AUDIO: ELECTRICAL INTERFERENCE';
+    else if(this.lighting.maxStress>.3) st='AUDIO: ELECTRICAL INTERFERENCE';
+    
+    if (this._lastSt !== st) {
+      this.status.textContent = st;
+      this._lastSt = st;
+    }
+    this.trackY=(this.trackY+dt*(60+(detected?240:0)))%(innerHeight+20);
+    this.track.style.transform=`translateY(${this.trackY}px)`;
   }
+
+  // OPTIMIZATION 2: Fixed the Spiral of Death so physics lockups can't happen
   loop(){
-    const d=Math.min(this.clock.getDelta(),.1);this.acc=Math.min(this.acc+d,.25);
-    while(this.acc>=CFG.STEP){this.update(CFG.STEP);this.acc-=CFG.STEP}
+    // Cap the delta to 0.1s to prevent physics explosions on lag spikes
+    const d = Math.min(this.clock.getDelta(), 0.1); 
+    
+    // Cap the total accumulated time to 0.25s (max 15 physics steps) to prevent lockups
+    // This allows the game to catch up without slowing down your movement speed
+    this.acc = Math.min(this.acc + d, 0.25);
+
+    while(this.acc >= CFG.STEP){
+      this.update(CFG.STEP);
+      this.acc -= CFG.STEP;
+    }
+    
     this.mp.update(d);
-    // ONE authoritative world: host samples its monster for clients, a client
-    // only mirrors the snapshot.  Both run inside this same loop.
     if(this.share.on){if(this.share.host)this.share.tick(d);else this.share.update(d)}
-    this.hud(d);this.renderer.render(this.scene,this.camera);
+    this.hud(d);
+    this.renderer.render(this.scene,this.camera);
   }
-  resize(){this.camera.aspect=innerWidth/innerHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(innerWidth,innerHeight)}
+  update(dt){
+    if(this.dead){if(this.share?.on&&this.share.host)this.monster.update(dt);return}
+    this.player.update(dt);this.flash.update(dt);
+    if(this.share?.on&&!this.share.host)this.camCD=Math.max(0,this.camCD-dt);
+    if(!this.share?.on||this.share.host)this.monster.update(dt);
+    this.lighting.update(dt,this.camera.position,this.monster);this.audio.update(dt);
+    if(!this.dark)this.audio.setStress(this.lighting.maxStress);
+    if(this.player.controls.isLocked&&(this.distT-=dt)<=0&&!this.dark){this.audio.distant();this.distT=rnd(25,60)}
+    this.stressSystem.update(dt);
+
+    // Environment zoom (hallways) and panic tunnel vision.
+    this._updateCameraZoom(dt);
+  }
 }
 
 window.game=new Game();
-// A program generated by Ryual
+//generated by Ryual
