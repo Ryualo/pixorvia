@@ -53,7 +53,7 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
 #rec{position:absolute;top:16px;left:20px;color:#ff4d4d;font-weight:700;letter-spacing:3px;font-size:14px}
 #rec i{display:inline-block;width:9px;height:9px;border-radius:50%;background:#f33;margin-right:7px;box-shadow:0 0 10px #f00;animation:blink 1s steps(1) infinite}
 
-/* PC Left Column: Objectives (Aligned with #clue-panel at top: 44px) */
+/* PC Left Column: Objectives */
 #obj-panel{
   position:absolute;top:44px;left:20px;
   background:transparent;border:none;padding:0;
@@ -70,7 +70,7 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
   font-weight:700;font-size:11px;letter-spacing:.1em;
 }
 
-/* PC Right Column: Discovered Monster Clues (Aligned symmetrically at top: 54px below SECTOR/COORDS) */
+/* PC Right Column: Discovered Monster Clues */
 #clue-panel{
   position:absolute;top:54px;right:20px;
   display:flex;flex-direction:column;align-items:flex-end;text-align:right;
@@ -82,17 +82,19 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
 .clue-item{color:#ebd9a0;opacity:.92;white-space:nowrap}
 .clue-item span{color:#ff6b5b;font-weight:700}
 
-/* Dying Investigator Audio Transcript Subtitle */
+/* Dying Investigator Audio Transcript Subtitle (Compact + Tap-to-Expand on Mobile) */
 #tape-sub{
   position:absolute;left:50%;bottom:88px;transform:translateX(-50%);
   width:min(540px,86vw);padding:10px 14px;
   background:rgba(14,4,4,.84);border-left:3px solid #ff3b2f;
   font-size:11px;line-height:1.55;color:#f2e6c2;letter-spacing:.05em;
   text-align:left;opacity:0;transition:opacity .25s;
-  text-shadow:0 1px 4px #000;
+  text-shadow:0 1px 4px #000;pointer-events:auto;cursor:pointer;
 }
 #tape-sub.show{opacity:1}
-#tape-sub b{color:#ff6b5b;display:block;font-size:10px;letter-spacing:.12em;margin-bottom:3px}
+#tape-sub b{color:#ff6b5b;display:block;font-size:10px;letter-spacing:.12em;margin-bottom:2px}
+#tape-sub .tape-body{display:block}
+#tape-sub .tape-more{display:none;color:#ff9988;font-size:8.5px;letter-spacing:.1em;margin-top:2px;font-weight:700}
 
 #top{position:absolute;top:16px;right:20px;text-align:right;font-size:10px;line-height:1.65;opacity:.75}
 #bottom{position:absolute;left:20px;right:20px;bottom:16px;display:flex;justify-content:space-between;font-size:10px}
@@ -101,7 +103,7 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
 #bar i{display:block;height:100%;width:100%;background:#cbd68c}
 #crank-msg{color:#ffaa00;font-weight:700;margin-right:6px;display:none;animation:blink .3s steps(1) infinite}
 
-/* ======================== CAMCORDER VIEWFINDER & HOLD-ON-OBJECT TARGET ======================== */
+/* ======================== CAMCORDER VIEWFINDER ======================== */
 #cross{position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);opacity:.28}
 #cross:before,#cross:after{content:"";position:absolute;background:#ddd}
 #cross:before{left:6px;top:1px;width:1px;height:12px}
@@ -118,16 +120,11 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
 #vf-frame .bl{bottom:0;left:0;border-width:0 0 2px 2px}
 #vf-frame .br{bottom:0;right:0;border-width:0 2px 2px 0}
 
-/* Progress fill bar inside the Viewfinder when holding on an objective */
+/* Progress fill bar inside the Viewfinder when holding CAM / SPACE */
 #vf-progress{
   position:absolute;left:0;bottom:0;height:4px;width:0%;
   background:#9eff7a;box-shadow:0 0 10px #9eff7a;
   opacity:0;transition:width .06s linear;
-}
-#vf-touch-hint{
-  position:absolute;inset:0;display:none;place-items:center;
-  font-size:10px;font-weight:700;letter-spacing:.12em;color:#d9ffca;
-  background:rgba(40,120,30,.18);text-shadow:0 1px 4px #000;
 }
 
 #vf-label{
@@ -146,11 +143,11 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
 #vf-frame.interact i{border-color:#9eff7a;box-shadow:0 0 10px rgba(140,255,100,.55)}
 #vf-frame.interact #vf-progress{opacity:1}
 #vf-frame.interact + #vf-label{opacity:1;color:#b8ff9e}
-#vf-frame.interact.holding{transform:translate(-50%,-50%) scale(0.95);background:rgba(80,220,60,.16)}
+#vf-frame.interact.holding{transform:translate(-50%,-50%) scale(0.95);background:rgba(80,220,60,.14)}
 
-#msg{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);padding:6px 12px;font-size:10.5px;background:rgba(0,0,0,.6);border:1px solid rgba(220,210,160,.22);opacity:0;transition:opacity .15s;text-align:center;max-width:75vw}
+#msg{position:absolute;left:50%;bottom:54px;transform:translateX(-50%);padding:6px 12px;font-size:10.5px;background:rgba(0,0,0,.6);border:1px solid rgba(220,210,160,.22);opacity:0;transition:opacity .15s;text-align:center;max-width:65vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #msg.show{opacity:1}
-#warning{position:absolute;top:46px;left:50%;transform:translateX(-50%);color:#d7c98e;font-size:10px;letter-spacing:2px;opacity:0;transition:opacity .2s;text-align:center;max-width:72vw}
+#warning{position:absolute;top:46px;left:50%;transform:translateX(-50%);color:#d7c98e;font-size:10px;letter-spacing:2px;opacity:0;transition:opacity .2s;text-align:center;max-width:72vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #warning.show{opacity:.9}
 #danger{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 42%,rgba(0,0,0,.42) 100%);opacity:0;transition:opacity .3s}
 #flash{position:fixed;inset:0;z-index:30;pointer-events:none;background:#fff;opacity:0}
@@ -187,7 +184,7 @@ body.performance-mode #vhs .track{display:none}
 @media (pointer: coarse) {
   #mobile-ui { display: block; position: fixed; inset: 0; z-index: 999; pointer-events: none; }
 
-  /* Top-center compact utility pills — NEVER overlap REC on the top-left! */
+  /* Top-center compact utility pills */
   #mobile-top-bar {
     position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
     display: flex; gap: 6px; pointer-events: auto;
@@ -213,16 +210,33 @@ body.performance-mode #vhs .track{display:none}
   #clue-panel { top: 46px; right: 14px; font-size: 8.5px; max-width: 42vw; line-height: 1.4; }
   .clue-item { white-space: normal; }
 
-  /* Interactive Hold-On-Target Viewfinder on Mobile! */
-  #vf-frame { width: 118px; height: 82px; }
-  #vf-frame.locked { width: 104px; height: 72px; }
-  #vf-frame.interact {
-    width: 132px; height: 92px;
-    pointer-events: auto; touch-action: none; cursor: pointer;
-    background: rgba(20, 60, 15, 0.25);
+  /* Compact Viewfinder on Mobile */
+  #vf-frame { width: 108px; height: 74px; }
+  #vf-frame.locked, #vf-frame.interact { width: 96px; height: 66px; }
+  #vf-label { top: calc(50% + 42px); font-size: 8.5px; max-width: 52vw; padding: 2px 6px; }
+
+  /* Compact 1-Line Ellipsis (...) Tape Pop-up on Mobile — Tap to Expand/Collapse! */
+  #tape-sub {
+    bottom: 34px; width: 48vw; padding: 6px 10px;
+    font-size: 9px; line-height: 1.35;
+    background: rgba(14, 4, 4, 0.88);
+    border-radius: 3px;
   }
-  #vf-frame.interact #vf-touch-hint { display: grid; }
-  #vf-label { top: calc(50% + 52px); font-size: 8.5px; max-width: 56vw; padding: 2px 6px; }
+  #tape-sub b {
+    font-size: 8.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #tape-sub:not(.expanded) .tape-body {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #tape-sub:not(.expanded) .tape-more {
+    display: block;
+  }
+  #tape-sub.expanded {
+    bottom: 42px; width: 62vw; z-index: 1005;
+  }
+
+  #msg { bottom: 36px; font-size: 9px; padding: 4px 8px; max-width: 46vw; }
+  #warning { top: 66px; font-size: 9px; max-width: 60vw; }
 
   /* Left Thumb Joystick */
   #joystick-zone {
@@ -242,30 +256,23 @@ body.performance-mode #vhs .track{display:none}
     font: 700 10px ui-monospace, monospace; letter-spacing: .04em;
     user-select: none; -webkit-user-select: none; touch-action: none;
     -webkit-tap-highlight-color: transparent;
+    transition: background .15s, border-color .15s, box-shadow .15s, transform .1s;
   }
   #action-right button:active {
     background: rgba(235, 220, 150, 0.28); border-color: #fff2b2;
   }
 
-  /* Secondary Floating Hold Button above Right Cluster */
-  #btn-hold {
-    position: absolute; bottom: 136px; right: 16px;
-    width: 103px !important; height: 38px !important;
-    border-radius: 6px !important;
-    background: rgba(25, 65, 20, 0.85) !important;
-    border: 1.5px solid #9eff7a !important;
+  /* When standing near an objective, CAM button lights up green to indicate HOLD [CAM]! */
+  #btn-c.interact-ready {
+    border-color: #9eff7a !important;
     color: #d9ffca !important;
-    font: 700 10px ui-monospace, monospace !important;
-    letter-spacing: 0.08em;
-    box-shadow: 0 0 12px rgba(120, 255, 90, 0.35);
-    display: none; pointer-events: auto; touch-action: none;
-    user-select: none; -webkit-user-select: none;
+    background: rgba(30, 85, 20, 0.78) !important;
+    box-shadow: 0 0 12px rgba(130, 255, 95, 0.45);
   }
-  #btn-hold.show { display: block; }
-  #btn-hold.holding {
-    background: rgba(90, 210, 60, 0.92) !important;
+  #btn-c.interact-holding {
+    background: rgba(110, 235, 75, 0.92) !important;
     color: #051202 !important;
-    transform: scale(0.96);
+    transform: scale(0.93);
   }
 }
 </style>
@@ -315,11 +322,10 @@ body.performance-mode #vhs .track{display:none}
   <div id="cross"></div>
   <div id="vf-frame">
     <i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i>
-    <div id="vf-touch-hint">HOLD HERE</div>
     <div id="vf-progress"></div>
   </div>
   <div id="vf-label">SUBJECT IN FRAME</div>
-  <div id="tape-sub"></div>
+  <div id="tape-sub" title="Tap to expand/collapse"></div>
   <div id="msg"></div>
   <div id="danger"></div>
   <div id="bottom">
@@ -365,7 +371,6 @@ body.performance-mode #vhs .track{display:none}
     <button id="btn-restart">⟳ SECTOR</button>
   </div>
   <div id="joystick-zone"></div>
-  <button id="btn-hold" type="button">● HOLD</button>
   <div id="action-right">
     <button id="btn-c">CAM</button>
     <button id="btn-f">LIGHT</button>
