@@ -910,10 +910,15 @@ class Player {
     const p = cam.position, r = CFG.R, w = this.g.world;
     if (!w.collides(p.x + m.x, p.z, r)) p.x += m.x;
     if (!w.collides(p.x, p.z + m.z, r)) p.z += m.z;
-    this.bob = this.moving ? this.bob + dt * CFG.BOB_FREQ * (s / CFG.WALK) : this.bob * .9;
-
-    if (standoff) this.bob += dt * 15;
-    p.y = CFG.EYE + Math.sin(this.bob) * CFG.BOB_AMP * (this.moving ? 1 : Math.min(1, Math.abs(this.bob)));
+    this.bobWeight = (this.bobWeight || 0) + ((this.moving ? 1 : 0) - (this.bobWeight || 0)) * Math.min(1, dt * 10);
+    if (this.moving) {
+      this.bob = (this.bob + dt * CFG.BOB_FREQ * (s / CFG.WALK)) % (Math.PI * 2);
+    }
+    if (standoff) {
+      this.bob = (this.bob + dt * 15) % (Math.PI * 2);
+      this.bobWeight = 1;
+    }
+    p.y = CFG.EYE + Math.sin(this.bob) * CFG.BOB_AMP * this.bobWeight;
   }
 }
 
