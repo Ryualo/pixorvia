@@ -3,30 +3,133 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Backrooms — Level 0 // Found Footage</title>
+<title>Backrooms by Ryual</title>
 <style>
 *{box-sizing:border-box}
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050403;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050403;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#e7d994}
 canvas{display:block}
-#start{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,rgba(57,49,18,.55),rgba(0,0,0,.97));color:#e7d994;cursor:pointer;text-align:center;letter-spacing:.08em}
-#start.hidden{opacity:0;pointer-events:none;transition:opacity .4s}
-#start .box{min-width:330px;padding:30px 42px;border:1px solid rgba(235,220,150,.25);background:rgba(0,0,0,.55);box-shadow:0 0 90px #000}
-#start b{display:block;font-size:24px;margin-bottom:12px}
-#start small{line-height:2;color:#aaa57e}
+
+/* ======================== MINIMAL PAUSE OVERLAY (ESC) ======================== */
+#start{
+  position:fixed;inset:0;z-index:50;display:grid;place-items:center;
+  background:rgba(0,0,0,.55);color:#e7d994;cursor:pointer;
+  text-align:center;letter-spacing:.1em;text-shadow:0 2px 8px #000;
+}
+#start.hidden{opacity:0;pointer-events:none;transition:opacity .25s}
+body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
+#start b{display:block;font-size:20px;margin-bottom:8px;color:#fff2b2}
+#start small{font-size:11px;line-height:1.9;color:#b8b088}
+
+/* ======================== LIVE BACKROOMS HOME SCREEN ======================== */
+#lobby{
+  position:fixed;inset:0;z-index:1000;display:grid;place-items:center;
+  background:radial-gradient(circle at 50% 50%,rgba(0,0,0,.22) 0%,rgba(0,0,0,.82) 100%);
+  color:#e7d994;letter-spacing:.1em;text-align:center;text-shadow:0 2px 10px #000;
+}
+#lobby.hidden{display:none}
+#lobby .menu{padding:20px;max-width:92vw}
+#lobby .tag{font-size:10px;color:#ff5555;letter-spacing:.25em;margin-bottom:6px;font-weight:700}
+#lobby b{display:block;font-size:clamp(24px,4vw,34px);margin-bottom:6px;color:#fff2b2;letter-spacing:.14em}
+#lobby .sub{font-size:11px;color:#b5ad84;margin-bottom:24px;letter-spacing:.12em}
+#lobby button,#lobby input{
+  font:inherit;font-size:12px;color:#e7d994;
+  background:rgba(15,13,7,.65);border:1px solid rgba(235,220,150,.4);
+  padding:10px 20px;margin:5px;letter-spacing:.12em;
+  backdrop-filter:blur(3px);transition:background .15s,border-color .15s;
+}
+#lobby button{cursor:pointer}
+#lobby button:hover:not(:disabled){background:rgba(235,220,150,.18);border-color:#fff2b2}
+#lobby button:disabled{opacity:.4;cursor:default}
+#lobby input{width:170px;text-transform:uppercase;text-align:center;outline:none}
+#lobby input:focus{border-color:#fff2b2}
+#lb-panel{display:none;margin-top:8px}
+#lb-enter{display:none;border-color:#b8e986;color:#d9f59a}
+#lb-back{border-color:rgba(235,220,150,.28);color:#b8b088}
+#lb-status{min-height:1.6em;margin-top:10px;font-size:11px;color:#c9c196}
+#lb-players{font-size:11px;color:#aaa57e}
+
+/* ======================== CAMCORDER & TRANSPARENT OBJECTIVES HUD ======================== */
 #hud{position:fixed;inset:0;z-index:20;pointer-events:none;color:#d4cfaa;text-shadow:0 1px 6px #000}
 #rec{position:absolute;top:17px;left:20px;color:#ff4d4d;font-weight:700;letter-spacing:3px;font-size:14px}
 #rec i{display:inline-block;width:9px;height:9px;border-radius:50%;background:#f33;margin-right:7px;box-shadow:0 0 10px #f00;animation:blink 1s steps(1) infinite}
-#top{position:absolute;top:16px;right:20px;text-align:right;font-size:10px;line-height:1.7;opacity:.72}
+
+/* Text-only transparent objectives */
+#obj-panel{
+  position:absolute;top:42px;left:20px;
+  background:transparent;border:none;padding:0;
+  font-size:11px;line-height:1.65;letter-spacing:.08em;
+  text-shadow:0 1px 4px #000,0 0 8px rgba(0,0,0,.9);
+}
+#obj-phase{color:#fff0a8;font-weight:700;margin-bottom:2px;font-size:10.5px;letter-spacing:.12em;opacity:.9;transition:color .3s}
+.obj-item{color:#d4cfaa;opacity:.88}
+.obj-item.done{color:#8cd968;text-decoration:line-through;opacity:.5}
+.obj-item.extract{color:#9eff7a;font-weight:700}
+.obj-item.jammed{color:#ff6655;font-weight:700;animation:blink .5s steps(1) infinite}
+#uplink-compass{
+  display:none;margin-top:4px;color:#b8e986;
+  font-weight:700;font-size:11px;letter-spacing:.1em;
+}
+
+/* Discovered Monster Clues HUD (Right side, transparent text) */
+#clue-panel{
+  position:absolute;top:115px;right:20px;text-align:right;
+  font-size:10.5px;line-height:1.6;letter-spacing:.08em;
+  text-shadow:0 1px 4px #000,0 0 8px rgba(0,0,0,.95);
+  max-width:290px;
+}
+#clue-title{color:#ff8877;font-weight:700;font-size:10px;letter-spacing:.14em;margin-bottom:2px;display:none}
+.clue-item{color:#ebd9a0;opacity:.92}
+.clue-item span{color:#ff6b5b;font-weight:700}
+
+/* Dying Investigator Audio Transcript Subtitle */
+#tape-sub{
+  position:absolute;left:50%;bottom:110px;transform:translateX(-50%);
+  width:min(560px,90vw);padding:10px 16px;
+  background:rgba(14,4,4,.84);border-left:3px solid #ff3b2f;
+  font-size:11px;line-height:1.6;color:#f2e6c2;letter-spacing:.06em;
+  text-align:left;opacity:0;transition:opacity .25s;
+  text-shadow:0 1px 4px #000;
+}
+#tape-sub.show{opacity:1}
+#tape-sub b{color:#ff6b5b;display:block;font-size:10px;letter-spacing:.14em;margin-bottom:3px}
+
+#top{position:absolute;top:16px;right:20px;text-align:right;font-size:10px;line-height:1.7;opacity:.75}
 #bottom{position:absolute;left:20px;right:20px;bottom:16px;display:flex;justify-content:space-between;font-size:10px}
 #battery{display:flex;align-items:center;gap:8px}
 #bar{width:82px;height:10px;border:1px solid #aaa;padding:1px;background:#111;position:relative}
 #bar i{display:block;height:100%;width:100%;background:#cbd68c}
 #crank-msg{color:#ffaa00;font-weight:700;margin-right:8px;display:none;animation:blink .3s steps(1) infinite}
+
+/* ======================== CAMCORDER VIEWFINDER & IDENTIFICATION ======================== */
 #cross{position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);opacity:.28}
 #cross:before,#cross:after{content:"";position:absolute;background:#ddd}
 #cross:before{left:6px;top:1px;width:1px;height:12px}
 #cross:after{left:1px;top:6px;width:12px;height:1px}
-#msg{position:absolute;left:50%;bottom:70px;transform:translateX(-50%);padding:8px 14px;background:rgba(0,0,0,.52);border:1px solid rgba(220,210,160,.2);opacity:0;transition:opacity .15s}
+
+#vf-frame{
+  position:absolute;left:50%;top:50%;width:154px;height:108px;
+  transform:translate(-50%,-50%);opacity:.2;transition:all .14s ease-out;
+}
+#vf-frame i{position:absolute;width:14px;height:14px;border-color:#e7d994;border-style:solid;transition:border-color .14s,box-shadow .14s}
+#vf-frame .tl{top:0;left:0;border-width:2px 0 0 2px}
+#vf-frame .tr{top:0;right:0;border-width:2px 2px 0 0}
+#vf-frame .bl{bottom:0;left:0;border-width:0 0 2px 2px}
+#vf-frame .br{bottom:0;right:0;border-width:0 2px 2px 0}
+#vf-label{
+  position:absolute;left:50%;top:calc(50% + 62px);transform:translateX(-50%);
+  font-size:10px;letter-spacing:1.5px;color:#ff5544;font-weight:700;
+  opacity:0;transition:opacity .12s;white-space:nowrap;
+  text-shadow:0 1px 4px #000,0 0 8px #000;
+}
+#vf-frame.locked{opacity:.95;width:126px;height:86px}
+#vf-frame.locked i{border-color:#ff4433;box-shadow:0 0 8px rgba(255,50,30,.55)}
+#vf-frame.locked + #vf-label{opacity:1;color:#ff5544}
+
+#vf-frame.interact{opacity:.95;width:132px;height:90px}
+#vf-frame.interact i{border-color:#9eff7a;box-shadow:0 0 10px rgba(140,255,100,.55)}
+#vf-frame.interact + #vf-label{opacity:1;color:#b8ff9e}
+
+#msg{position:absolute;left:50%;bottom:70px;transform:translateX(-50%);padding:6px 12px;background:rgba(0,0,0,.55);border:1px solid rgba(220,210,160,.22);opacity:0;transition:opacity .15s;text-align:center}
 #msg.show{opacity:1}
 #warning{position:absolute;top:52px;left:50%;transform:translateX(-50%);color:#d7c98e;font-size:10px;letter-spacing:2px;opacity:0;transition:opacity .2s}
 #warning.show{opacity:.85}
@@ -50,33 +153,19 @@ canvas{display:block}
 @keyframes shift{50%{transform:translateX(6px) skewX(2deg);filter:hue-rotate(20deg) saturate(1.6)}}
 @keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-3%,2%)}66%{transform:translate(2%,-3%)}100%{transform:translate(-2%,-1%)}}
 @keyframes blink{50%{opacity:.15}}
-#lobby{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:rgba(0,0,0,.94);color:#e7d994;letter-spacing:.08em;text-align:center}
-#lobby.hidden{display:none}
-#lobby .box{min-width:330px;max-width:92vw;padding:28px 36px;border:1px solid rgba(235,220,150,.25);background:rgba(0,0,0,.55);box-shadow:0 0 90px #000}
-#lobby b{display:block;font-size:22px;margin-bottom:16px}
-#lobby button,#lobby input{font:inherit;color:#e7d994;background:rgba(40,36,18,.7);border:1px solid rgba(235,220,150,.35);padding:9px 14px;margin:5px;letter-spacing:.08em}
-#lobby button{cursor:pointer}#lobby button:disabled{opacity:.4;cursor:default}
-#lobby input{width:170px;text-transform:uppercase}
-#lb-panel{display:none}#lb-enter{display:none}
-#lb-status{min-height:1.6em;margin-top:12px;font-size:12px;color:#aaa57e}
-#lb-players{font-size:11px;color:#aaa57e}
 #mp-hud{position:fixed;top:60px;right:20px;z-index:21;display:none;pointer-events:none;color:#d4cfaa;font-size:10px;line-height:1.7;text-align:right;white-space:pre;text-shadow:0 1px 6px #000;opacity:.8}
 
 /* --- MOBILE UI STYLES --- */
 #mobile-ui { display: none; }
 @media (pointer: coarse) {
   #mobile-ui { display: block; position: fixed; inset: 0; z-index: 999; pointer-events: none; }
-  
   #fullscreen-btn { position: absolute; top: 15px; left: 15px; pointer-events: auto; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #aaa; padding: 10px; border-radius: 5px; font-family: monospace; }
-  
-  /* Moved Restart button to Top-Center to prevent overlap with HUD coords */
   #btn-restart { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); pointer-events: auto; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #aaa; padding: 10px; border-radius: 5px; font-family: monospace; }
-  
-  /* Virtual Joystick Container */
   #joystick-zone { position: absolute; bottom: 30px; left: 20px; width: 140px; height: 140px; pointer-events: auto; touch-action: none; }
-  
   #action-right { position: absolute; bottom: 30px; right: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; pointer-events: auto; }
   #mobile-ui button { width: 55px; height: 55px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; font-size: 12px; backdrop-filter: blur(4px); user-select: none; -webkit-user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent; }
+  #obj-panel { top: 108px; left: 15px; font-size: 9.5px; }
+  #clue-panel { top: 108px; right: 15px; font-size: 9px; max-width: 180px; }
 }
 
 #performance-btn{
@@ -96,54 +185,83 @@ body.performance-mode #vhs .scan{opacity:.38}
 body.performance-mode #vhs .track{display:none}
 
 @media (pointer:coarse){
-  /* Moved Performance Button below the fullscreen button on the left to avoid Action button overlaps */
-  #performance-btn{right:auto;left:15px;top:70px;bottom:auto;padding:10px 11px;font-size:10px}
+  #performance-btn{right:auto;left:15px;top:62px;bottom:auto;padding:8px 10px;font-size:10px}
   body.performance-mode #mobile-ui button{backdrop-filter:none}
 }
 </style>
 
-<!-- Load Virtual Joystick Library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-JDKLCK33H3"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-JDKLCK33H3');
-</script>
 </head>
 <body>
 
-<div id="start"><div class="box">
-<b>LEVEL 0 // NOCLIP ERROR</b>
-<small>CLICK TO ENTER<br>WASD — MOVE &nbsp; SHIFT — RUN<br>F — FLASHLIGHT &nbsp; E (HOLD) — WIND DYNAMO<br>CLICK / C — CAMERA FLASH &nbsp; ESC — RELEASE MOUSE &nbsp; R — REGENERATE</small>
-</div></div>
+<!-- MINIMAL PAUSE OVERLAY (WHEN PRESSING ESC) -->
+<div id="start">
+  <div>
+    <b>PAUSED</b>
+    <small>
+      CLICK TO RESUME<br>
+      WASD MOVE &nbsp;·&nbsp; SHIFT RUN &nbsp;·&nbsp; F FLASHLIGHT &nbsp;·&nbsp; E WIND &nbsp;·&nbsp; CLICK/C PHOTO OR INTERACT &nbsp;·&nbsp; SPACE UPLOAD<br>
+      [P] SKIP PHASE (TEST) &nbsp;·&nbsp; [T] TELEPORT TO OBJECTIVE (TEST)
+    </small>
+  </div>
+</div>
 
+<!-- CAMCORDER HUD + TRANSPARENT TEXT-ONLY OBJECTIVES + CLUE LOG -->
 <div id="hud">
-<div id="rec"><i></i>REC <span id="clock">00:00:00</span></div>
-<div id="top">LEVEL <span id="level">0</span><br><span id="coords">000,000</span></div>
-<div id="warning">SIGNAL DISTORTION</div>
-<div id="cross"></div><div id="msg"></div><div id="danger"></div>
-<div id="bottom"><span id="status">AUDIO: LOW HUM</span>
-<span id="battery"><span id="crank-msg">[E] WINDING...</span> BATT <span id="bar"><i></i></span> <span id="pct">100%</span></span></div>
+  <div id="rec"><i></i>REC <span id="clock">00:00:00</span></div>
+
+  <div id="obj-panel">
+    <div id="obj-phase">PHASE 1/5 // RECONNAISSANCE</div>
+    <div id="obj-list"></div>
+    <div id="uplink-compass"></div>
+  </div>
+
+  <div id="clue-panel">
+    <div id="clue-title">ENTITY PROFILE // CLUES</div>
+    <div id="clue-list"></div>
+  </div>
+
+  <div id="top">SECTOR <span id="level">01</span><br><span id="coords">000,000</span></div>
+  <div id="warning">SIGNAL DISTORTION</div>
+  <div id="cross"></div>
+  <div id="vf-frame"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
+  <div id="vf-label">SUBJECT IN FRAME — [C / CLICK] TO CAPTURE</div>
+  <div id="tape-sub"></div>
+  <div id="msg"></div>
+  <div id="danger"></div>
+  <div id="bottom">
+    <span id="status">AUDIO: LOW HUM</span>
+    <span id="battery"><span id="crank-msg">[E] WINDING...</span> BATT <span id="bar"><i></i></span> <span id="pct">100%</span></span>
+  </div>
 </div>
 
 <div id="jumpscare"><div class="face"><div class="head"></div><div class="eye e1"></div><div class="eye e2"></div><div class="mouth"></div></div></div>
 
-<div id="lobby"><div class="box">
-<b>LEVEL 0 // NOCLIP ERROR</b>
-<div id="lb-modes"><button id="lb-solo">SOLO</button><button id="lb-coop">CO-OP (2–4)</button></div>
-<div id="lb-panel">
-<div><input id="lb-name" maxlength="14" placeholder="YOUR NAME"></div>
-<div><button id="lb-host">HOST ROOM</button></div>
-<div><input id="lb-room" maxlength="6" placeholder="ROOM ID"><button id="lb-join">JOIN</button></div>
-<div id="lb-status"></div><div id="lb-players"></div>
-<button id="lb-enter">ENTER LEVEL 0</button>
+<!-- TRANSPARENT HOME SCREEN SHOWING THE 3D BACKROOMS BEHIND IT -->
+<div id="lobby">
+  <div class="menu">
+    <div class="tag">● LIVE CAMCORDER FEED</div>
+    <b>THE BACKROOMS</b>
+    <div class="sub">INVESTIGATE THE SECTOR · RECOVER DYING LOGS · TRANSMIT DATA</div>
+    <div id="lb-modes">
+      <button id="lb-solo">PLAY</button>
+      <button id="lb-coop">CO-OP (2–4)</button>
+    </div>
+    <div id="lb-panel">
+      <div><input id="lb-name" maxlength="14" placeholder="YOUR NAME"></div>
+      <div><button id="lb-host">HOST SECTOR</button></div>
+      <div><input id="lb-room" maxlength="6" placeholder="ROOM ID"><button id="lb-join">JOIN</button></div>
+      <div id="lb-status"></div>
+      <div id="lb-players"></div>
+      <div>
+        <button id="lb-back" type="button">← BACK</button>
+        <button id="lb-enter">ENTER SECTOR</button>
+      </div>
+    </div>
+  </div>
 </div>
-</div></div>
 
 <div id="mp-hud"></div>
 <button id="performance-btn" type="button" aria-pressed="false" title="Reduce graphics for smoother performance">PERFORMANCE: OFF</button>
@@ -152,11 +270,8 @@ body.performance-mode #vhs .track{display:none}
 
 <div id="mobile-ui">
   <button id="fullscreen-btn">⛶ FULLSCREEN</button>
-  <button id="btn-restart">⟳ RESTART</button>
-  
-  <!-- Virtual Joystick Area -->
+  <button id="btn-restart">⟳ SECTOR</button>
   <div id="joystick-zone"></div>
-  
   <div id="action-right">
     <button id="btn-c">CAM</button>
     <button id="btn-f">FLASH</button>
@@ -166,58 +281,7 @@ body.performance-mode #vhs .track{display:none}
 </div>
 
 <script type="module" src="game.js"></script>
-
-<!-- Virtual Joystick to Keyboard Event Bridge -->
-<script>
-  window.addEventListener('DOMContentLoaded', () => {
-    // Only initialize on mobile devices
-    if (!('ontouchstart' in window) && navigator.maxTouchPoints === 0) return;
-
-    const zone = document.getElementById('joystick-zone');
-    if (!zone) return;
-
-    // Create the joystick
-    const manager = nipplejs.create({
-      zone: zone,
-      mode: 'static',
-      position: { left: '50%', top: '50%' },
-      color: 'white',
-      size: 110
-    });
-
-    let activeKeys = [];
-
-    // Map 360 joystick angles to WASD Keyboard events for game.js to read
-    manager.on('move', (e, data) => {
-      let deg = data.angle.degree;
-      let newKeys = [];
-      
-      // Calculate directions
-      if (deg >= 22.5 && deg <= 157.5) newKeys.push('KeyW');  // Forward
-      if (deg >= 202.5 && deg <= 337.5) newKeys.push('KeyS'); // Backward
-      if (deg > 112.5 && deg < 247.5) newKeys.push('KeyA');   // Left
-      if (deg < 67.5 || deg > 292.5) newKeys.push('KeyD');    // Right
-
-      // KeyUp old directions that are no longer pressed
-      activeKeys.forEach(k => {
-        if (!newKeys.includes(k)) window.dispatchEvent(new KeyboardEvent('keyup', { code: k }));
-      });
-      
-      // KeyDown new directions
-      newKeys.forEach(k => {
-        if (!activeKeys.includes(k)) window.dispatchEvent(new KeyboardEvent('keydown', { code: k }));
-      });
-      
-      activeKeys = newKeys;
-    });
-
-    // Release all keys when joystick is dropped
-    manager.on('end', () => {
-      activeKeys.forEach(k => window.dispatchEvent(new KeyboardEvent('keyup', { code: k })));
-      activeKeys = [];
-    });
-  });
-</script>
+<script type="module" src="investigation.js"></script>
 
 </body>
 </html>
