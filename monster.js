@@ -20,8 +20,9 @@ export function createMonsterAI(Base, THREE, CFG) {
 
   // ─── Named Constants ─────────────────────────────────────────────────────────
   const CELL = CFG.CELL;
+  const INV_CELL = 1 / CELL;
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const cap  = (v) => Math.min(8, v);
+  const cap = v => Math.min(8, v);
 
   // Perception
   const SENSE_INTERVAL       = 0.25;
@@ -61,18 +62,18 @@ export function createMonsterAI(Base, THREE, CFG) {
 
   // Speeds
   const FURY_FLEE_SPEED_MULT = 4;
-  const FURY_CHASE_SPEED     = 2.5;    // BUG FIX: was 1.05 — way too slow
+  const FURY_CHASE_SPEED     = 2.5;
   const STALK_RETREAT_MULT   = 3.4;
   const FLASH_CHASE_MULT     = 1.5;
   const NEAR_CHASE_BASE      = 1.4;
   const NEAR_CHASE_POWER     = 0.6;
-  const BEAM_FLEE_SPEED_MULT = 4.2;    // Multiplier for fleeing when spotted
+  const BEAM_FLEE_SPEED_MULT = 4.2;
 
   // Trail
   const TRAIL_STEP_DIST      = 0.9;
-  // FIX: Let the monster drop 3x as many puddles and keep them for 5 minutes
   const TRAIL_MAX_COUNT      = 600;
   const TRAIL_LIFETIME       = 300;
+  const TRAIL_FADE_INTERVAL  = 0.25;
 
   // Director AI
   const DIRECTOR_QUIET_THRESHOLD   = 30;
@@ -111,38 +112,47 @@ export function createMonsterAI(Base, THREE, CFG) {
 
     authority() { return !this.g.share?.on || this.g.share.host; }
 
+    _cacheDom() {
+      if (typeof document === 'undefined') return;
+      if (!this._vhsEl) this._vhsEl = document.getElementById('vhs');
+      if (!this._dangerEl) this._dangerEl = document.getElementById('danger');
+    }
+
     reset() {
-      // A restart/maze regeneration can happen during fury. Restore owned
-      // lighting before clearing the saved restoration data.
       if (this._broken?.length) this.restoreWorld();
-      const oldVhs = typeof document !== 'undefined' ? document.getElementById('vhs') : null;
-      if (oldVhs && this._distanceOpacityActive) oldVhs.style.opacity = '';
+      this._cacheDom();
+      if (this._vhsEl) {
+        if (this._distanceOpacityActive) this._vhsEl.style.opacity = '';
+        if (this._lastFilterStr) this._vhsEl.style.filter = '';
+      }
+      if (this._dangerEl) this._dangerEl.style.opacity = '0';
       super.reset();
 
       // ── Core state ──
-      this.mode     = 'PATROL';
-      this.target   = null;
-      this.known    = null;
-      this.goal     = -1;
-      this.seenT    = 0; // Tracks how long the player has looked directly at it
+      this.mode   = 'PATROL';
+      this.target = null;
+      this.known  = null;
+      this.goal   = -1;
+      this.seenT  = 0;
 
       // ── Timers ──
-      this.senseT   = 0;
-      this.planT    = 0;
-      this.stateT   = 0;
-      this.pauseT   = 0;
-      this.screamT  = 0;
-      this.fakeT    = FAKE_SOUND_MIN;
-      this.age      = 0;
-      this.decayT   = 0;
+      this.senseT     = 0;
+      this.planT      = 0;
+      this.stateT     = 0;
+      this.pauseT     = 0;
+      this.screamT    = 0;
+      this.fakeT      = FAKE_SOUND_MIN;
+      this.age        = 0;
+      this.decayT     = 0;
+      this.trailFadeT = 0;
 
       // ── Trail system ──
       this.trailDistance = 0;
-      this.trailSeq     = 0;
-      this.trail        = [];
-      this.trailSent    = 0;
-      this.trailPhase   = 0;
-      this.fullT        = 0;
+      this.trailSeq      = 0;
+      this.trail         = [];
+      this.trailSent     = 0;
+      this.trailPhase    = 0;
+      this.fullT         = 0;
 
       // ── Networking ──
       this.soundSeq    = 0;
@@ -161,13 +171,23 @@ export function createMonsterAI(Base, THREE, CFG) {
       this.observed = new Map();
       this.retreat  = false;
 
-      // ── Stalk state ──
-      this._stalkT   = 0;
-      this._stalkDir = 1;
+      // ── Stalk & Psychological state ──
+      this._stalkT          = 0;
+      this._stalkDir        = 1;
+      this._playerWasMoving = false;
+      this._echoStepTimer   = 0;
+      this._crankCreeping   = false;
 
-      // ── Visual effects ──
-      this._glitch      = 0;
-      this._glitchShown = false;
+      // ── Visual effects & DOM cache guards ──
+      this._glitch                = 0;
+      this._glitchShown           = false;
+      this._lastDangerOp          = '0';
+      this._lastVhsOp             = '';
+      this._lastFilterStr         = '';
+      this._lastChromaStr         = '';
+      this._distanceOpacityActive = false;
+      this._lastVisibleDistance   = Infinity;
+      this._headBone              = undefined;
 
       // ── Flash / beam response ──
       this._flashResponse = null;
@@ -180,40 +200,42 @@ export function createMonsterAI(Base, THREE, CFG) {
       this._beamSeen      = new Map();
 
       // ── Fury system ──
-      this.fury     = 0;
-      this._fury    = null;
-      this._broken  = [];
+      this.fury              = 0;
+      this._fury             = null;
+      this._broken           = [];
+      this._brokenSet        = new Set();
+      this._dimCellX         = -1;
+      this._dimCellZ         = -1;
       this._lightingSnapshot = null;
-      this._worldDimActive = false;
+      this._worldDimActive   = false;
       this._flickerSnapshots = new Map();
-      this._distanceOpacityActive = false;
-      this._lastVisibleDistance = Infinity;
-      this._quietPhaseUntil = 0;
+      this._quietPhaseUntil  = 0;
 
       // ── Memory / learning ──
       this.memory = new Map();
       this.escape = new Float32Array(4);
 
       // ── Director AI — dynamic tension manager ──
-      this._lastScareTime  = 0;
-      this._lastDeathTime  = 0;
-      this._aggression     = 0.3;
-      this._directorT      = 0;
+      this._lastScareTime = 0;
+      this._lastDeathTime = 0;
+      this._aggression    = 0.3;
+      this._directorT     = 0;
 
-      // ── Hallway Stare — freeze and stare from long corridors ──
-      this._stareReadyAt = 0;
-      this._staring      = false;
-      this._stareUntil   = 0;
-      this._stareTarget  = null;
+      // ── Hallway Stare ──
+      this._stareReadyAt    = 0;
+      this._staring         = false;
+      this._stareUntil      = 0;
+      this._stareTarget     = null;
+      this._stareTeleported = false;
 
-      // ── Corner Peek — lean around corners while stalking ──
+      // ── Corner Peek ──
       this._peekReadyAt = 0;
       this._peeking     = false;
       this._peekUntil   = 0;
       this._peekOrigin  = null;
       this._peekDir     = null;
 
-      // ── Mimic Steps — fake footsteps from adjacent corridors ──
+      // ── Mimic Steps ──
       this._mimicReadyAt  = 0;
       this._mimicBurst    = 0;
       this._mimicPos      = null;
@@ -233,16 +255,24 @@ export function createMonsterAI(Base, THREE, CFG) {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // SPATIAL UTILITIES
+    // SPATIAL UTILITIES (Zero-Allocation via flatGrid)
     // ═════════════════════════════════════════════════════════════════════════
 
-    /** Convert world coords to a flat cell ID, or -1 if that cell is a wall. */
-    cellId(x, z) {
-      const w = this.g.world, c = w.cell(x, z);
-      return w.grid[c.x]?.[c.y] === 0 ? c.x * w.n + c.y : -1;
+    _isFloor(cx, cz) {
+      const w = this.g.world, n = w.n;
+      if (cx < 0 || cz < 0 || cx >= n || cz >= n) return false;
+      return w.flatGrid ? w.flatGrid[cx * n + cz] === 0 : w.grid[cx]?.[cz] === 0;
     }
 
-    /** Record a learned observation about a cell. */
+    cellId(x, z) {
+      const w = this.g.world, n = w.n;
+      const cx = Math.round(x * INV_CELL), cz = Math.round(z * INV_CELL);
+      if (cx < 0 || cz < 0 || cx >= n || cz >= n) return -1;
+      const k = cx * n + cz;
+      const t = w.flatGrid ? w.flatGrid[k] : w.grid[cx]?.[cz];
+      return t === 0 ? k : -1;
+    }
+
     record(id, key, amount) {
       if (id < 0) return;
       let r = this.memory.get(id);
@@ -250,42 +280,114 @@ export function createMonsterAI(Base, THREE, CFG) {
       r[key] = cap(r[key] + amount);
     }
 
-    /** Raycast LOS — pillars also block monster perception. */
     line(ax, az, bx, bz) {
-      const w = this.g.world;
-      const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 0.45);
-      for (let i = 1; i < n; i++) {
-        if (w.collides(ax + (bx - ax) * i / n, az + (bz - az) * i / n, 0.08))
-          return false;
+      const w = this.g.world, n = w.n, fg = w.flatGrid;
+      const dx = bx - ax, dz = bz - az;
+      const dist = Math.hypot(dx, dz);
+      const steps = Math.ceil(dist / 0.45);
+      if (steps <= 1) return true;
+
+      const invSteps = 1 / steps;
+      const pilHalf = CELL * 0.17 + 0.08;
+
+      for (let i = 1; i < steps; i++) {
+        const t = i * invSteps;
+        const px = ax + dx * t, pz = az + dz * t;
+        const cx = Math.round(px * INV_CELL), cz = Math.round(pz * INV_CELL);
+        if (cx < 0 || cz < 0 || cx >= n || cz >= n) return false;
+        const cellType = fg ? fg[cx * n + cz] : w.grid[cx][cz];
+        if (cellType === 1) return false;
+        if (cellType === 2) {
+          if (Math.abs(px - cx * CELL) < pilHalf && Math.abs(pz - cz * CELL) < pilHalf) {
+            return false;
+          }
+        }
       }
       return true;
     }
 
-    /** Check if a cell is a corner (exactly 2 open neighbors at a right angle). */
     isCorner(cx, cz) {
-      const w = this.g.world;
-      const openDirs = [];
-      for (const [dx, dz] of DIRS) {
-        if (w.grid[cx + dx]?.[cz + dz] === 0) openDirs.push([dx, dz]);
+      let count = 0, sumX = 0, sumZ = 0;
+      for (let i = 0; i < 4; i++) {
+        const dx = DIRS[i][0], dz = DIRS[i][1];
+        if (this._isFloor(cx + dx, cz + dz)) {
+          count++;
+          sumX += dx;
+          sumZ += dz;
+        }
       }
-      if (openDirs.length !== 2) return false;
-      const [a, b] = openDirs;
-      return a[0] * b[0] + a[1] * b[1] === 0; // perpendicular
+      return count === 2 && (sumX !== 0 || sumZ !== 0);
     }
 
-    /** Check if a position is in a long straight corridor (min 5 cells). */
     isLongHallway(cx, cz, minLength = 5) {
-      const w = this.g.world;
-      // Horizontal
-      let hLen = 1;
-      for (let d = 1; d <= minLength; d++) { if (w.grid[cx + d]?.[cz] === 0) hLen++; else break; }
-      for (let d = 1; d <= minLength; d++) { if (w.grid[cx - d]?.[cz] === 0) hLen++; else break; }
-      if (hLen >= minLength && w.grid[cx]?.[cz + 1] !== 0 && w.grid[cx]?.[cz - 1] !== 0) return 'h';
-      // Vertical
-      let vLen = 1;
-      for (let d = 1; d <= minLength; d++) { if (w.grid[cx]?.[cz + d] === 0) vLen++; else break; }
-      for (let d = 1; d <= minLength; d++) { if (w.grid[cx]?.[cz - d] === 0) vLen++; else break; }
-      if (vLen >= minLength && w.grid[cx + 1]?.[cz] !== 0 && w.grid[cx - 1]?.[cz] !== 0) return 'v';
+      if (!this._isFloor(cx, cz + 1) && !this._isFloor(cx, cz - 1)) {
+        let hLen = 1;
+        for (let d = 1; d <= minLength; d++) { if (this._isFloor(cx + d, cz)) hLen++; else break; }
+        for (let d = 1; d <= minLength; d++) { if (this._isFloor(cx - d, cz)) hLen++; else break; }
+        if (hLen >= minLength) return 'h';
+      }
+      if (!this._isFloor(cx + 1, cz) && !this._isFloor(cx - 1, cz)) {
+        let vLen = 1;
+        for (let d = 1; d <= minLength; d++) { if (this._isFloor(cx, cz + d)) vLen++; else break; }
+        for (let d = 1; d <= minLength; d++) { if (this._isFloor(cx, cz - d)) vLen++; else break; }
+        if (vLen >= minLength) return 'v';
+      }
+      return false;
+    }
+
+    pathToCell(targetCell) {
+      const w = this.g.world, n = w.n, fg = w.flatGrid;
+      const mx = Math.round(this.pos.x * INV_CELL), my = Math.round(this.pos.z * INV_CELL);
+      const start = mx * n + my;
+      this.path.length = 0;
+      if (start === targetCell || targetCell < 0) {
+        this.goal = targetCell;
+        return true;
+      }
+
+      const prev = this.prev, q = this.q;
+      prev.fill(-1);
+      let h = 0, t = 0, found = false;
+      q[t++] = start;
+      prev[start] = start;
+
+      while (h < t) {
+        const id = q[h++];
+        if (id === targetCell) { found = true; break; }
+        const x = (id / n) | 0, y = id % n;
+        for (let i = 0; i < 4; i++) {
+          const X = x + DIRS[i][0], Y = y + DIRS[i][1];
+          if (X < 0 || Y < 0 || X >= n || Y >= n) continue;
+          const k = X * n + Y;
+          if (prev[k] === -1 && (fg ? fg[k] === 0 : w.grid[X][Y] === 0)) {
+            prev[k] = id;
+            q[t++] = k;
+          }
+        }
+      }
+
+      if (!found) {
+        this.goal = -1;
+        return false;
+      }
+      let cur = targetCell;
+      while (cur !== start) {
+        this.path.push(cur);
+        cur = prev[cur];
+      }
+      this.path.reverse();
+      this.goal = targetCell;
+      return true;
+    }
+
+    _hasRecentTrailNear(x, z, maxAge, radius) {
+      const rSq = radius * radius;
+      for (let i = this.trail.length - 1; i >= 0; i--) {
+        const t = this.trail[i];
+        if (this.age - t.time >= maxAge) break;
+        const dx = t.x - x, dz = t.z - z;
+        if (dx * dx + dz * dz < rSq) return true;
+      }
       return false;
     }
 
@@ -303,10 +405,11 @@ export function createMonsterAI(Base, THREE, CFG) {
         fn(mp?.peer?.id || 'local', g.camera.position, speed);
       }
       if (mp?.coop) {
+        const now = performance.now();
         for (const [id, r] of mp.remotes) {
           if (!r.alive || !r.buf.length) continue;
           const b = r.buf, p = b[b.length - 1], a = b[Math.max(0, b.length - 3)];
-          if (performance.now() - p.t > 1500) continue;
+          if (now - p.t > 1500) continue;
           const speed = p.t > a.t
             ? Math.min(CFG.RUN, Math.hypot(p.x - a.x, p.z - a.z) * 1000 / (p.t - a.t))
             : 0;
@@ -319,30 +422,28 @@ export function createMonsterAI(Base, THREE, CFG) {
     // DIRECTOR AI — Dynamic Tension Manager
     // ═════════════════════════════════════════════════════════════════════════
 
-    /** Record a scare event (monster seen, scream heard, etc.) */
     markScare() { this._lastScareTime = this.age; }
 
-    /** Record a player death — triggers cooldown. */
     markDeath() { this._lastDeathTime = this.age; this._lastScareTime = this.age; }
 
-    /** Update aggression based on time since last scare/death. */
     updateDirector(dt) {
       this._directorT -= dt;
       if (this._directorT > 0) return;
-      this._directorT = 1.0;
+      const step = 1.0;
+      this._directorT = step;
 
       const quietTime = this.age - this._lastScareTime;
       const deathRecovery = this.age - this._lastDeathTime;
 
       if (deathRecovery < DIRECTOR_RECENT_DEATH_COOL) {
-        this._aggression = Math.max(DIRECTOR_MIN_AGGRESSION, this._aggression - dt * 0.08);
+        this._aggression = Math.max(DIRECTOR_MIN_AGGRESSION, this._aggression - step * 0.08);
         return;
       }
       if (quietTime > DIRECTOR_QUIET_THRESHOLD) {
         const ramp = Math.min(1, (quietTime - DIRECTOR_QUIET_THRESHOLD) / 60);
         this._aggression = Math.min(DIRECTOR_MAX_AGGRESSION, this._aggression + ramp * 0.04);
       } else {
-        this._aggression = Math.max(0.3, this._aggression - dt * 0.02);
+        this._aggression = Math.max(0.3, this._aggression - step * 0.02);
       }
     }
 
@@ -351,8 +452,9 @@ export function createMonsterAI(Base, THREE, CFG) {
     // ═════════════════════════════════════════════════════════════════════════
 
     sense() {
-      const w = this.g.world, mc = w.cell(this.pos.x, this.pos.z);
-      this.flood(mc.x, mc.y);
+      const w = this.g.world;
+      const mcx = Math.round(this.pos.x * INV_CELL), mcz = Math.round(this.pos.z * INV_CELL);
+      this.flood(mcx, mcz);
 
       let best = null, bestScore = -Infinity;
       this.observed.clear();
@@ -371,7 +473,6 @@ export function createMonsterAI(Base, THREE, CFG) {
 
         if (!sight && !heard) return;
 
-        // Sound gives a cell center, never a silent player's live position
         const ox = sight ? p.x : (cell / w.n | 0) * CELL;
         const oz = sight ? p.z : (cell % w.n) * CELL;
         const near = sight ? d < NEAR_THRESHOLD
@@ -383,22 +484,29 @@ export function createMonsterAI(Base, THREE, CFG) {
 
         // ── Track movement patterns ──
         const old = this.tracks.get(id);
+        let vx = 0, vz = 0;
         if (old && old.cell !== cell) {
+          vx = Math.sign(ox - old.x);
+          vz = Math.sign(oz - old.z);
           this.record(cell, 'route', 0.3);
           if (this.mode === 'CHASE') {
             const ex = ox - old.x, ez = oz - old.z;
             const k = Math.abs(ex) > Math.abs(ez) ? (ex > 0 ? 0 : 1) : (ez > 0 ? 2 : 3);
             this.escape[k] = cap(this.escape[k] + 0.2);
           }
-          if (this.trail.some(t => this.age - t.time < 42 && Math.hypot(t.x - ox, t.z - oz) < 2.5)) {
+          if (this._hasRecentTrailNear(ox, oz, 42, 2.5)) {
             this.record(cell, 'follow', 0.2);
             this.habits.follow = cap(this.habits.follow + 0.05);
           }
-        } else if (old && sight && speed < 0.3 && this.openCount(cell / w.n | 0, cell % w.n) <= 2) {
-          this.record(cell, 'hide', 0.025);
-          this.habits.hide = cap(this.habits.hide + 0.005);
+        } else if (old) {
+          vx = old.vx || 0;
+          vz = old.vz || 0;
+          if (sight && speed < 0.3 && this.openCount(cell / w.n | 0, cell % w.n) <= 2) {
+            this.record(cell, 'hide', 0.025);
+            this.habits.hide = cap(this.habits.hide + 0.005);
+          }
         }
-        this.tracks.set(id, { cell, x: ox, z: oz, time: this.age });
+        this.tracks.set(id, { cell, x: ox, z: oz, vx, vz, time: this.age });
 
         const learned = this.memory.get(cell);
         const routeBias = learned ? Math.min(2.5, (learned.route || 0) * 0.22
@@ -440,7 +548,7 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (this._lure) {
         const seen = this.observed.get(this._lure.id);
         if (seen) this.known = { x: seen.x, z: seen.z, cell: seen.cell, time: this.age };
-        this.target = this._lure.id; // BUG FIX: was missing target assignment
+        this.target = this._lure.id;
         return;
       }
 
@@ -469,7 +577,6 @@ export function createMonsterAI(Base, THREE, CFG) {
           this.markScare();
 
           if (this.mode === 'PATROL' || this.mode === 'INVESTIGATE' || this.mode === 'SEARCH') {
-            // Director AI modulates attack probability
             const attackChance = 0.08 + this._aggression * 0.12;
             const attack = best.d < 10 && this.age >= this._lureReadyAt
               && Math.random() < attackChance;
@@ -478,7 +585,6 @@ export function createMonsterAI(Base, THREE, CFG) {
               this._hunt = { kind: 'ordinary', id: best.id, until: this.age + 3 };
               this.change('CHASE');
             } else {
-              // Try hallway stare first — classic backrooms horror moment
               if (this.tryHallwayStare(best)) return;
               this.change('STALK');
             }
@@ -512,7 +618,10 @@ export function createMonsterAI(Base, THREE, CFG) {
     change(mode) {
       if (this.mode === mode) return;
       this._staring = false;
+      this._stareTeleported = false;
       this._peeking = false;
+      this.peeking  = false;
+      this.lingerT  = 0;
       this.mode = mode; this.stateT = 0; this.planT = 0;
       this.goal = -1; this.path.length = 0; this.retreat = false;
       this._chaseAccelT = 0;
@@ -541,9 +650,20 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (s.kind === 'scream') {
         (a.roar || a.shriek).call(a, this.scratch);
       } else if (s.kind === 'mimic') {
-        // Mimic footsteps — use footstep audio if available, otherwise whisper
-        if (a.footstep) a.footstep.call(a, this.scratch, d);
-        else (a.whisper || a.shriek).call(a, this.scratch, d);
+        if (a.ctx && a.stepBuf && a.spatial) {
+          const x = a.ctx, t = x.currentTime, src = x.createBufferSource(), f = x.createBiquadFilter(), g = x.createGain();
+          src.buffer = a.stepBuf;
+          src.playbackRate.value = 0.85 + Math.random() * 0.3;
+          f.type = 'lowpass';
+          f.frequency.value = 650 + Math.random() * 300;
+          g.gain.setValueAtTime(0.35, t);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+          src.connect(f); f.connect(g);
+          a.spatial(g, this.scratch, 1, d);
+          src.start(t); src.stop(t + 0.22);
+        } else if (a.monsterStep) {
+          a.monsterStep(this.scratch, d);
+        }
       } else if (s.kind === 'dart') {
         if (a.whoosh) a.whoosh.call(a, this.scratch);
       } else {
@@ -560,7 +680,7 @@ export function createMonsterAI(Base, THREE, CFG) {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // HALLWAY STARE — Freeze and stare from end of long corridor
+    // HALLWAY STARE & PSYCHOLOGICAL HORROR UPGRADES
     // ═════════════════════════════════════════════════════════════════════════
 
     tryHallwayStare(obs) {
@@ -568,10 +688,9 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (obs.d < STARE_MIN_DIST || obs.d > STARE_MAX_DIST) return false;
       if (!obs.sight) return false;
 
-      const w = this.g.world, mc = w.cell(this.pos.x, this.pos.z);
-      if (!this.isLongHallway(mc.x, mc.y)) return false;
+      const mcx = Math.round(this.pos.x * INV_CELL), mcz = Math.round(this.pos.z * INV_CELL);
+      if (!this.isLongHallway(mcx, mcz)) return false;
 
-      // Check if the player is roughly looking toward us
       const cam = this.g.camera;
       if (cam) {
         cam.getWorldDirection(this.scratch);
@@ -579,14 +698,15 @@ export function createMonsterAI(Base, THREE, CFG) {
         const dist = Math.hypot(dx, dz);
         if (dist > 0.1) {
           const dot = (dx * this.scratch.x + dz * this.scratch.z) / dist;
-          if (dot < 0.5) return false; // Player not looking toward us
+          if (dot < 0.5) return false;
         }
       }
 
-      // Director AI makes stares more frequent when aggression is high
       if (Math.random() > 0.3 + this._aggression * 0.4) return false;
 
       this._staring = true;
+      this._stareTeleported = false;
+      this.lingerT = 1;
       this._stareUntil = this.age + STARE_DURATION_MIN
         + Math.random() * (STARE_DURATION_MAX - STARE_DURATION_MIN);
       this._stareReadyAt = this.age + STARE_COOLDOWN;
@@ -597,39 +717,132 @@ export function createMonsterAI(Base, THREE, CFG) {
       return true;
     }
 
+    /**
+     * 1. One-Delayed-Step Echo & 3. Flashlight-Crank Exploitation
+     */
+    psychologicalTick(dt) {
+      const g = this.g, p = g.player;
+      if (!this.active || g.dead || this.mode === 'CHASE' || this._fury || this._hunt) return;
+
+      const d = this.dist();
+
+      // ── A. The "One Extra Step" Echo when Player Stops Walking ──
+      if (p.moving && d < 16 && d > 3.5) {
+        this._playerWasMoving = true;
+        this._echoStepTimer = 0.24 + Math.random() * 0.12;
+      } else if (this._playerWasMoving && !p.moving) {
+        this._echoStepTimer -= dt;
+        if (this._echoStepTimer <= 0) {
+          this._playerWasMoving = false;
+          if (Math.random() < 0.45 + this._aggression * 0.35) {
+            g.camera.getWorldDirection(this.scratch);
+            const bx = g.camera.position.x - this.scratch.x * 3.8;
+            const bz = g.camera.position.z - this.scratch.z * 3.8;
+            this.scratch.set(bx, 0, bz);
+            g.audio?.monsterStep?.(this.scratch, 3.8);
+            this.markScare();
+          }
+        }
+      }
+
+      // ── B. Flashlight-Crank Predator (Advances only while player holds E) ──
+      if (p.winding && !g.dark && d < 20 && d > 3.2 && (this.mode === 'STALK' || this.mode === 'AMBUSH' || this.mode === 'SEARCH')) {
+        g.camera.getWorldDirection(this.facing);
+        const dx = this.pos.x - g.camera.position.x, dz = this.pos.z - g.camera.position.z;
+        const dot = (dx * this.facing.x + dz * this.facing.z) / (d || 1);
+        if (dot < 0.55 || !g.flash.on) {
+          if (this.known) this.pathToCell(this.known.cell);
+          this.move(dt, CFG.WALK * 1.65);
+          this._crankCreeping = true;
+        }
+      } else if (this._crankCreeping && !p.winding) {
+        this._crankCreeping = false;
+        this.pauseT = Math.max(this.pauseT, 1.1);
+        this.speed = 0;
+      }
+    }
+
+    /**
+     * 2. Upgraded Hallway Stare with "Weeping Angel" Light-Blink Vanish / Teleport
+     */
     hallwayStareTick(dt) {
       if (!this._staring) return false;
 
       const obs = this.observed.get(this._stareTarget);
-      const tooClose = obs && obs.d < 8;
+      const tooClose = obs && obs.d < 7.5;
       const expired = this.age >= this._stareUntil;
+
+      const blinkLights = () => {
+        this.startFlickerWarning();
+        this._flickerT = 0.34;
+        this.g.audio?.pop?.(this.pos);
+        if (this.g.glitch) this.g.glitch();
+      };
 
       if (tooClose) {
         this._staring = false;
-        if (Math.random() < 0.3 + this._aggression * 0.3) {
-          this._hunt = { kind: 'ordinary', id: this._stareTarget, until: this.age + 3 };
-          this.change('CHASE');
-        } else {
-          this.change('STALK'); this.retreat = true;
-          this._stalkT = this.age + 3;
-        }
-        return true;
-      }
-      if (expired) {
-        this._staring = false;
-        this.change('STALK'); this.retreat = true;
-        this._stalkT = this.age + 2;
+        this._stareTeleported = false;
+        this.lingerT = 0;
+        blinkLights();
+        this._hunt = { kind: 'ordinary', id: this._stareTarget, until: this.age + 3 };
+        this.change('CHASE');
         return true;
       }
 
-      // Face the player, stay perfectly still with uncanny jitter
+      // Mid-stare "Weeping Angel" step-forward on a light blink
+      if (!this._stareTeleported && obs && obs.d > 13 && this._stareUntil - this.age < 1.6 && Math.random() < 0.45) {
+        this._stareTeleported = true;
+        const stepX = this.pos.x + this.dir.x * CELL * 2;
+        const stepZ = this.pos.z + this.dir.z * CELL * 2;
+        if (!this.g.world.collides(stepX, stepZ, COLLISION_RADIUS)) {
+          blinkLights();
+          this.pos.x = stepX;
+          this.pos.z = stepZ;
+          this._stareUntil = this.age + 1.1;
+        }
+      }
+
+      if (expired) {
+        this._staring = false;
+        this._stareTeleported = false;
+        this.lingerT = 0;
+        blinkLights();
+        if (obs && this.cornerRoute(obs) && this.path.length) {
+          const vanishId = this.path[Math.min(2, this.path.length - 1)];
+          const n = this.g.world.n;
+          this.pos.set(((vanishId / n) | 0) * CELL, 0, (vanishId % n) * CELL);
+          this.path.length = 0;
+        }
+        this.change('STALK');
+        this.retreat = true;
+        this._stalkT = this.age + 2.5;
+        return true;
+      }
+
       if (obs) this.dir.set(obs.x - this.pos.x, 0, obs.z - this.pos.z).normalize();
       this.speed = 0;
+      this.lingerT = 1;
       const jitter = Math.sin(this.age * 7) * 0.003;
       this.dir.x += jitter;
       this.dir.normalize();
       this.renderLocal(dt);
       return true;
+    }
+
+    /**
+     * 4. Dead-End Executioner Speed Modifier
+     */
+    getChaseSpeed(baseChaseSpeed) {
+      if (!this.known) return baseChaseSpeed;
+      const n = this.g.world.n;
+      const pcx = (this.known.cell / n) | 0, pcz = this.known.cell % n;
+      const d = Math.hypot(this.known.x - this.pos.x, this.known.z - this.pos.z);
+
+      if (d < 7.5 && d > 1.8 && this.openCount(pcx, pcz) === 1 && !this._hunt) {
+        this.startFlickerWarning();
+        return CFG.WALK * 0.48;
+      }
+      return baseChaseSpeed;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -638,20 +851,23 @@ export function createMonsterAI(Base, THREE, CFG) {
 
     tryCornerPeek() {
       if (this.age < this._peekReadyAt || !this.known) return false;
-      const w = this.g.world, mc = w.cell(this.pos.x, this.pos.z);
-      if (!this.isCorner(mc.x, mc.y)) return false;
+      const w = this.g.world;
+      const mcx = Math.round(this.pos.x * INV_CELL), mcz = Math.round(this.pos.z * INV_CELL);
+      if (!this.isCorner(mcx, mcz)) return false;
 
       const k = this.known;
       const d = Math.hypot(k.x - this.pos.x, k.z - this.pos.z);
       if (d < 4 || d > 15) return false;
       if (this.line(this.pos.x, this.pos.z, k.x, k.z)) return false;
 
-      for (const [dx, dz] of DIRS) {
+      for (let i = 0; i < 4; i++) {
+        const dx = DIRS[i][0], dz = DIRS[i][1];
         const px = this.pos.x + dx * PEEK_LEAN_DIST;
         const pz = this.pos.z + dz * PEEK_LEAN_DIST;
         if (w.collides(px, pz, 0.1)) continue;
         if (this.line(px, pz, k.x, k.z)) {
           this._peeking = true;
+          this.peeking  = true;
           this._peekUntil = this.age + PEEK_DURATION;
           this._peekReadyAt = this.age + PEEK_COOLDOWN;
           this._peekOrigin = { x: this.pos.x, z: this.pos.z };
@@ -667,6 +883,7 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (this.age >= this._peekUntil) {
         if (this._peekOrigin) { this.pos.x = this._peekOrigin.x; this.pos.z = this._peekOrigin.z; }
         this._peeking = false;
+        this.peeking  = false;
         return true;
       }
       const t = Math.max(0, Math.min(1,
@@ -675,14 +892,13 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (this._peekOrigin && this._peekDir) {
         const nx = this._peekOrigin.x + this._peekDir.x * lean;
         const nz = this._peekOrigin.z + this._peekDir.z * lean;
-        // Validate every interpolated step, not just the endpoint. A peek must
-        // never push the model through a wall on narrow procedural corridors.
         if (!this.g.world.collides(nx, nz, COLLISION_RADIUS)) {
           this.pos.x = nx; this.pos.z = nz;
         } else {
           this._peekUntil = this.age;
           this.pos.x = this._peekOrigin.x; this.pos.z = this._peekOrigin.z;
           this._peeking = false;
+          this.peeking  = false;
           return true;
         }
       }
@@ -701,14 +917,15 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (this.mode === 'CHASE' || this._hunt || this._fury) return;
       if (!this.known) return;
 
-      const d = Math.hypot(this.known.x - this.pos.x, this.known.z - this.pos.z);
+      const k = this.known;
+      const d = Math.hypot(k.x - this.pos.x, k.z - this.pos.z);
       if (d < MIMIC_MIN_DIST || d > MIMIC_MAX_DIST) return;
       if (Math.random() > 0.02 + this._aggression * 0.05) return;
 
-      const w = this.g.world, k = this.known, pc = w.cell(k.x, k.z);
-      for (const [dx, dz] of DIRS) {
-        const nx = pc.x + dx * 3, nz = pc.y + dz * 3;
-        if (w.grid[nx]?.[nz] !== 0) continue;
+      const pcx = Math.round(k.x * INV_CELL), pcz = Math.round(k.z * INV_CELL);
+      for (let i = 0; i < 4; i++) {
+        const nx = pcx + DIRS[i][0] * 3, nz = pcz + DIRS[i][1] * 3;
+        if (!this._isFloor(nx, nz)) continue;
         const mx = nx * CELL, mz = nz * CELL;
         if (this.line(k.x, k.z, mx, mz)) continue;
 
@@ -755,7 +972,6 @@ export function createMonsterAI(Base, THREE, CFG) {
       this._flickerT += Math.max(0, dt);
       const w = this.g.world;
       if (w?.fixtures) {
-        // Irregular pulses are less mechanical than a clean on/off sine wave.
         const phase = this._flickerT;
         const flicker = (Math.sin(phase * 31) > 0.45 || Math.sin(phase * 9.7) > 0.94) ? 1 : 0.08;
         for (const [f, saved] of this._flickerSnapshots) {
@@ -776,53 +992,68 @@ export function createMonsterAI(Base, THREE, CFG) {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // PATHFINDING & PLANNING
+    // PATHFINDING & PLANNING (With Predictive Junction Interception)
     // ═════════════════════════════════════════════════════════════════════════
 
     plan() {
-      const w = this.g.world, k = this.known, mode = this.mode;
+      const w = this.g.world, n = w.n, k = this.known, mode = this.mode;
 
       if ((mode === 'CHASE' || mode === 'INVESTIGATE'
         || (mode === 'SEARCH' && this.stateT < 4)) && k) {
-        const here = this.cellId(this.pos.x, this.pos.z);
-        if (here === k.cell) { this.path.length = 0; this.goal = k.cell; return; }
-        this.search(w.n * w.n, (id) => id === k.cell ? 1 : -Infinity);
-        this.goal = k.cell; return;
+        let targetCell = k.cell;
+        // 5. Predictive Junction Interception: if player broke LOS during CHASE,
+        // project 2 cells ahead along their movement direction to cut them off!
+        const obs = this.observed.get(this.target);
+        const tr = this.tracks.get(this.target);
+        if (mode === 'CHASE' && !obs?.sight && tr && (tr.vx || tr.vz)) {
+          const pcx = (k.cell / n) | 0, pcz = k.cell % n;
+          for (let step = 2; step >= 1; step--) {
+            const ix = pcx + tr.vx * step, iz = pcz + tr.vz * step;
+            if (this._isFloor(ix, iz)) {
+              targetCell = ix * n + iz;
+              break;
+            }
+          }
+        }
+        this.pathToCell(targetCell);
+        return;
       }
 
       if (mode === 'AMBUSH' && this.goal >= 0) return;
 
       const maxDepth = mode === 'PATROL' ? 14 : 12;
       this.search(maxDepth, (id, depth, x, z) => {
-        const r = this.memory.get(id);
-        const open = this.openCount(id / w.n | 0, id % w.n);
-        let learned = r ? r.route * 0.45 + r.hide * 0.6 + r.follow * 0.35 - r.deaths * 0.65 : 0;
+        const cx = (id / n) | 0, cz = id % n;
+        const open = this.openCount(cx, cz);
 
         if (k) {
           const dx = x - k.x, dz = z - k.z, d = Math.hypot(dx, dz);
-          const dir = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 0 : 1) : (dz > 0 ? 2 : 3);
-          learned += this.escape[dir] * 0.25;
-
+          if (mode === 'SEARCH' && d > 18) return -Infinity;
           if (mode === 'AMBUSH') {
             if (d < 6 || d > 22 || open > 2 || this.line(k.x, k.z, x, z)) return -Infinity;
-            const marked = this.trail.some(t => this.age - t.time < 42 && Math.hypot(t.x - x, t.z - z) < 3);
-            learned += marked ? -2 : 2;
           }
           if (mode === 'STALK') {
             if (this.retreat) return d * 0.5 - depth * 0.6 + Math.random() * 2;
-            // FIX: Changed distance from 12 to 4 so it breathes down your neck
             return -Math.abs(d - 4) * 0.7 - depth * 0.25 + Math.random() * 3;
           }
-          if (mode === 'SEARCH' && d > 18) return -Infinity;
         } else if (mode === 'AMBUSH' && open > 2) return -Infinity;
 
-        // Wall-hugging preference for stalk/ambush
+        const r = this.memory.get(id);
+        let learned = r ? r.route * 0.45 + r.hide * 0.6 + r.follow * 0.35 - r.deaths * 0.65 : 0;
+
+        if (k) {
+          const dx = x - k.x, dz = z - k.z;
+          const dir = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 0 : 1) : (dz > 0 ? 2 : 3);
+          learned += this.escape[dir] * 0.25;
+          if (mode === 'AMBUSH') {
+            const marked = this._hasRecentTrailNear(x, z, 42, 3);
+            learned += marked ? -2 : 2;
+          }
+        }
+
         let wallBonus = 0;
         if (mode === 'STALK' || mode === 'AMBUSH') {
-          const cx = id / w.n | 0, cz = id % w.n;
-          let adjacent = 0;
-          for (const [ddx, ddz] of DIRS) { if (w.grid[cx + ddx]?.[cz + ddz] !== 0) adjacent++; }
-          wallBonus = adjacent >= 2 ? 1.5 : 0;
+          wallBonus = (4 - open) >= 2 ? 1.5 : 0;
         }
 
         return Math.min(3, Math.max(-3, learned)) + Math.random() * 4 - depth * 0.16
@@ -837,26 +1068,44 @@ export function createMonsterAI(Base, THREE, CFG) {
 
     spawn() {
       if (!this.authority()) return;
-      const w = this.g.world;
+      const w = this.g.world, n = w.n;
       let best = -1, score = -Infinity;
-      // Director AI: more aggressive = closer spawns
       const minDist = 24 - this._aggression * 6;
       const maxDist = 65 - this._aggression * 15;
 
-      for (let x = 1; x < w.n - 1; x++) for (let z = 1; z < w.n - 1; z++) {
-        if (w.grid[x][z] !== 0) continue;
-        let near = Infinity, visible = false, count = 0;
-        this.players((id, p) => {
-          count++; const d = Math.hypot(x * CELL - p.x, z * CELL - p.z);
-          near = Math.min(near, d);
-          if (d < 30 && this.line(x * CELL, z * CELL, p.x, p.z)) visible = true;
-        });
-        if (!count || near < minDist || near > maxDist || visible) continue;
-        const s = Math.random() * 10 - Math.abs(near - 32) * 0.2;
-        if (s > score) { score = s; best = x * w.n + z; }
+      const pList = [];
+      this.players((id, p) => pList.push(p));
+      if (!pList.length) { this.respawn = 3; return; }
+
+      for (let x = 1; x < n - 1; x++) {
+        const wx = x * CELL;
+        for (let z = 1; z < n - 1; z++) {
+          if (!this._isFloor(x, z)) continue;
+          const wz = z * CELL;
+          let near = Infinity, visible = false;
+          for (let i = 0; i < pList.length; i++) {
+            const p = pList[i];
+            const d = Math.hypot(wx - p.x, wz - p.z);
+            if (d < near) near = d;
+          }
+          if (near < minDist || near > maxDist) continue;
+
+          for (let i = 0; i < pList.length; i++) {
+            const p = pList[i];
+            const dx = wx - p.x, dz = wz - p.z;
+            if (dx * dx + dz * dz < 900 && this.line(wx, wz, p.x, p.z)) {
+              visible = true;
+              break;
+            }
+          }
+          if (visible) continue;
+
+          const s = Math.random() * 10 - Math.abs(near - 32) * 0.2;
+          if (s > score) { score = s; best = x * n + z; }
+        }
       }
       if (best < 0) { this.respawn = 3; return; }
-      this.pos.set((best / w.n | 0) * CELL, 0, (best % w.n) * CELL);
+      this.pos.set((best / n | 0) * CELL, 0, (best % n) * CELL);
       this.lastGoo.copy(this.pos);
       this.active = true; this.pooled = false; this.group.visible = true;
       this.change('PATROL');
@@ -965,7 +1214,6 @@ export function createMonsterAI(Base, THREE, CFG) {
 
         this._beamSeen.set(id, this.age);
         this._lure = null;
-        // Triggers the generalized fleeTick to run away from light
         this._hunt = { kind: 'flee', id, x: d.x, z: d.z, cell, until: this.age + 3 };
         this.target = id;
         this.known = { x: d.x, z: d.z, cell, time: this.age };
@@ -1012,8 +1260,8 @@ export function createMonsterAI(Base, THREE, CFG) {
         const open = this.openCount(cx, cz);
         if (away <= start || open < 2 || this.line(k.x, k.z, x, z)) return -Infinity;
 
-        const side = w.grid[cx + 1]?.[cz] === 0 || w.grid[cx - 1]?.[cz] === 0;
-        const forward = w.grid[cx]?.[cz + 1] === 0 || w.grid[cx]?.[cz - 1] === 0;
+        const side = this._isFloor(cx + 1, cz) || this._isFloor(cx - 1, cz);
+        const forward = this._isFloor(cx, cz + 1) || this._isFloor(cx, cz - 1);
         const r = this.memory.get(id);
         const learned = r ? Math.min(2, r.route * 0.3 + r.follow * 0.4 - r.deaths * 0.5) : 0;
         return (side && forward ? 5 : 0) + (open >= 3 ? 2 : 0)
@@ -1096,15 +1344,13 @@ export function createMonsterAI(Base, THREE, CFG) {
           this._lureReadyAt = this.age + 7;
           this._nearReadyAt = Math.max(this._nearReadyAt, this.age + 1);
 
-          // Director AI modulates post-lure attack probability
           const attack = h.followed && obs?.sight && obs.d < 6
             && Math.random() < 0.15 + this._aggression * 0.15;
           if (attack) {
             this._hunt = { kind: 'ordinary', id: h.id, until: this.age + 2.5 };
             this.change('CHASE');
           } else if (!h.followed) {
-            // FIX: If the player ignores the lure, punish them by attacking their back
-            this.target = h.id; 
+            this.target = h.id;
             this._hunt = { kind: 'ordinary', id: h.id, until: this.age + 3.5 };
             this.change('CHASE');
           } else {
@@ -1135,7 +1381,6 @@ export function createMonsterAI(Base, THREE, CFG) {
       const brokenLOS = !this.line(this.pos.x, this.pos.z, h.x, h.z);
       const arrived = this.goal >= 0 && !this.path.length;
 
-      // Finish fleeing if timer runs out or if successfully broken LOS and reached hideout early
       if (this.age >= h.until || (brokenLOS && arrived && this.age > h.until - 2.5)) {
         this._hunt = null; this.retreat = false; this.speed = 0;
         this.change('SEARCH'); this.pauseT = 0.6; this.senseT = 0.6;
@@ -1156,13 +1401,11 @@ export function createMonsterAI(Base, THREE, CFG) {
             const away = this.distMap[id];
             if (away <= start) return -Infinity;
             const cx = id / n | 0, cz = id % n;
-            const side = w.grid[cx + 1]?.[cz] === 0 || w.grid[cx - 1]?.[cz] === 0;
-            const forward = w.grid[cx]?.[cz + 1] === 0 || w.grid[cx]?.[cz - 1] === 0;
+            const side = this._isFloor(cx + 1, cz) || this._isFloor(cx - 1, cz);
+            const forward = this._isFloor(cx, cz + 1) || this._isFloor(cx, cz - 1);
             const open = this.openCount(cx, cz);
-            
-            // Heavily penalize cells still visible to the player's last known spot
             const visible = this.line(h.x, h.z, x, z);
-            
+
             return (away - start) * 3 - depth * 0.3
               + (open === 2 && side && forward ? 5 : 0) - (open === 1 ? 6 : 0)
               - (visible ? 10 : 0);
@@ -1172,11 +1415,11 @@ export function createMonsterAI(Base, THREE, CFG) {
       }
 
       const x = this.pos.x, z = this.pos.z;
-      this.move(dt, CFG.RUN * BEAM_FLEE_SPEED_MULT); // Dart/Flee speed mapping
+      this.move(dt, CFG.RUN * BEAM_FLEE_SPEED_MULT);
       const moved = Math.hypot(this.pos.x - x, this.pos.z - z);
       this.speed = moved / Math.max(dt, 1e-6);
       if (moved > 0.001) this.leaveTrail(moved);
-      this.fadeTrail(); this.renderLocal(dt);
+      this.renderLocal(dt);
       return true;
     }
 
@@ -1234,30 +1477,43 @@ export function createMonsterAI(Base, THREE, CFG) {
       }
     }
 
-    dimWorld() {
+    dimWorld(force = false) {
       const g = this.g, w = g.world;
       if (!w || !w.fixtures) return;
       if (!this._worldDimActive) {
         this._worldDimActive = true;
         this._broken.length = 0;
+        this._brokenSet.clear();
+        this._dimCellX = -1;
+        this._dimCellZ = -1;
         this._lightingSnapshot = g.lighting && !g.lighting.dark
           ? { amb: g.lighting.amb.intensity, hemi: g.lighting.hemi.intensity }
           : null;
       }
-      const R = 13, R2 = R * R;
-      for (const f of w.fixtures) {
-        if (f.dead) continue;
-        const dx = f.pos.x - this.pos.x, dz = f.pos.z - this.pos.z;
-        if (dx * dx + dz * dz > R2) continue;
-        // Save each fixture once. Restore its original state instead of
-        // pretending every light was healthy and at 100% brightness.
-        if (!this._broken.some(entry => entry.fixture === f)) {
-          this._broken.push({ fixture: f, dead: f.dead, dying: f.dying,
-            stress: f.stress, flick: f.flick });
+
+      const cx = Math.round(this.pos.x * INV_CELL), cz = Math.round(this.pos.z * INV_CELL);
+      if (force || cx !== this._dimCellX || cz !== this._dimCellZ) {
+        this._dimCellX = cx;
+        this._dimCellZ = cz;
+        const R = 13, R2 = R * R;
+        const F = w.fixtures;
+        for (let i = 0; i < F.length; i++) {
+          const f = F[i];
+          if (f.dead) continue;
+          const dx = f.pos.x - this.pos.x, dz = f.pos.z - this.pos.z;
+          if (dx * dx + dz * dz > R2) continue;
+          if (!this._brokenSet.has(f)) {
+            this._brokenSet.add(f);
+            this._broken.push({
+              fixture: f, dead: f.dead, dying: f.dying,
+              stress: f.stress, flick: f.flick
+            });
+          }
+          f.dead = true; f.flick = 0; w.setTube(f, 0);
         }
-        f.dead = true; f.flick = 0; w.setTube(f, 0);
+        if (w.dirty) { w.tubes.instanceColor.needsUpdate = true; w.dirty = false; }
       }
-      if (w.dirty) { w.tubes.instanceColor.needsUpdate = true; w.dirty = false; }
+
       const L = g.lighting;
       if (L && !L.dark) {
         L.amb.intensity = Math.min(L.amb.intensity, 0.07);
@@ -1277,6 +1533,9 @@ export function createMonsterAI(Base, THREE, CFG) {
         w?.setTube?.(f, saved.dead ? 0 : (Number.isFinite(saved.flick) ? saved.flick : 1));
       }
       this._broken.length = 0;
+      this._brokenSet?.clear();
+      this._dimCellX = -1;
+      this._dimCellZ = -1;
       if (w?.dirty) { w.tubes.instanceColor.needsUpdate = true; w.dirty = false; }
       const L = g.lighting;
       if (this._furyDim && L && !L.dark && this._lightingSnapshot) {
@@ -1290,7 +1549,6 @@ export function createMonsterAI(Base, THREE, CFG) {
 
     enterFury(id) {
       if (!this.authority() || !this.active || this._fury) return;
-      // ── LIGHTS-OUT WARNING — flicker before the darkness falls ──
       this.startFlickerWarning();
 
       this._fury = { id, phase: 'flee', until: this.age + 0.9 };
@@ -1298,7 +1556,7 @@ export function createMonsterAI(Base, THREE, CFG) {
       this._flashResponse = null; this.screamT = 0;
       this.change('CHASE'); this.scream(true);
       this.path.length = 0; this.goal = -1; this.planT = 0;
-      this.dimWorld();
+      this.dimWorld(true);
       this.markScare();
     }
 
@@ -1326,11 +1584,6 @@ export function createMonsterAI(Base, THREE, CFG) {
       this.scream();
       this.dimWorld();
 
-      // ╔══════════════════════════════════════════════════════════════════╗
-      // ║ BUG FIX: Save position BEFORE move() so `moved` is nonzero!    ║
-      // ║ Previously x,z were saved AFTER move(), making moved always 0. ║
-      // ║ This broke trail generation and speed tracking during fury.    ║
-      // ╚══════════════════════════════════════════════════════════════════╝
       const x0 = this.pos.x, z0 = this.pos.z;
 
       if (F.phase === 'flee') {
@@ -1348,23 +1601,13 @@ export function createMonsterAI(Base, THREE, CFG) {
         }
         if (this.planT <= 0) {
           this.planT = 0.5;
-          const k = this.known;
-          if (k) {
-            const here = this.cellId(this.pos.x, this.pos.z);
-            if (here === k.cell) { this.path.length = 0; this.goal = k.cell; }
-            else {
-              this.search(this.g.world.n * this.g.world.n, id => id === k.cell ? 1 : -Infinity);
-              this.goal = k.cell;
-            }
-          }
+          if (this.known) this.pathToCell(this.known.cell);
         }
         const gain = obs && obs.d < 2.2 ? 0.42 : 0.16;
         this.fury = Math.max(0, this.fury - dt * gain);
 
-        // BUG FIX: fury chase speed was 1.05x (barely above walk!) — now 2.5x
         this.move(dt, CFG.RUN * FURY_CHASE_SPEED);
 
-        // Catch check during fury
         this.players((id, p) => {
           if (id !== F.id) return;
           if (Math.hypot(p.x - this.pos.x, p.z - this.pos.z) > CATCH_RADIUS) return;
@@ -1385,13 +1628,10 @@ export function createMonsterAI(Base, THREE, CFG) {
 
       if (F.phase === 'flee' && this.age >= F.until) F.phase = 'chase';
 
-      // BUG FIX: compute moved from SAVED pre-move position
       const moved = Math.hypot(this.pos.x - x0, this.pos.z - z0);
       this.speed = moved / Math.max(dt, 1e-6);
       if (moved > 0.001) this.leaveTrail(moved);
 
-      this.fadeTrail();
-      // flickerWarningTick is owned by update(); do not advance it twice in fury.
       this.renderLocal(dt);
       return true;
     }
@@ -1410,10 +1650,11 @@ export function createMonsterAI(Base, THREE, CFG) {
         let x, z;
         if (this.path.length) {
           const id = this.path[0];
-          x = (id / n | 0) * CELL; z = (id % n) * CELL;
-          if (w.grid[id / n | 0]?.[id % n] !== 0) {
+          const cx = (id / n) | 0, cz = id % n;
+          if (!this._isFloor(cx, cz)) {
             this.path.length = 0; this.planT = 0; return;
           }
+          x = cx * CELL; z = cz * CELL;
           if (Math.hypot(x - this.pos.x, z - this.pos.z) < WAYPOINT_ARRIVAL) {
             this.path.shift(); continue;
           }
@@ -1426,7 +1667,6 @@ export function createMonsterAI(Base, THREE, CFG) {
         const dx = x - this.pos.x, dz = z - this.pos.z, d = Math.hypot(dx, dz);
         if (d < 0.035) return;
 
-        // Organic movement: sinusoidal path deviation
         const bend = (Math.sin(this.age * 2.3 + x * 0.17)
           + 0.5 * Math.sin(this.age * 4.1 + z * 0.23)) * 0.1 * Math.min(1, d);
         const desired = Math.atan2(dx, dz) + bend;
@@ -1444,8 +1684,9 @@ export function createMonsterAI(Base, THREE, CFG) {
         if (w.collides(this.pos.x + mx, this.pos.z + mz, COLLISION_RADIUS)) {
           mx = dx / d * length; mz = dz / d * length;
           if (w.collides(this.pos.x + mx, this.pos.z + mz, COLLISION_RADIUS)) {
-            const cell = w.cell(this.pos.x, this.pos.z);
-            const cx = cell.x * CELL - this.pos.x, cz = cell.y * CELL - this.pos.z;
+            const cellX = Math.round(this.pos.x * INV_CELL);
+            const cellZ = Math.round(this.pos.z * INV_CELL);
+            const cx = cellX * CELL - this.pos.x, cz = cellZ * CELL - this.pos.z;
             const cd = Math.hypot(cx, cz);
             if (cd < 0.035) continue;
             const s = Math.min(length, cd) / cd;
@@ -1485,14 +1726,15 @@ export function createMonsterAI(Base, THREE, CFG) {
       this.dropTrail(x, z, (1.7 + Math.random() * 1.2) * (phase % 13 > 7 ? 0.55 : 1), phase * 0.83);
 
       if (phase % 7 === 0) {
-        const c = this.g.world.cell(this.pos.x, this.pos.z);
-        for (const [dx, dz] of DIRS) {
-          if (this.g.world.grid[c.x + dx]?.[c.y + dz] !== 0 || dx * this.dir.x + dz * this.dir.z > 0.5) continue;
+        const cx = Math.round(this.pos.x * INV_CELL), cz = Math.round(this.pos.z * INV_CELL);
+        for (let i = 0; i < 4; i++) {
+          const dx = DIRS[i][0], dz = DIRS[i][1];
+          if (!this._isFloor(cx + dx, cz + dz) || dx * this.dir.x + dz * this.dir.z > 0.5) continue;
           for (let j = 1; j <= 5; j++) if (j !== 3) {
             const bend = Math.sin(j * 1.3) * 0.65;
             this.dropTrail(
-              c.x * CELL + dx * j * 0.85 - dz * bend,
-              c.y * CELL + dz * j * 0.85 + dx * bend,
+              cx * CELL + dx * j * 0.85 - dz * bend,
+              cz * CELL + dz * j * 0.85 + dx * bend,
               1.5 - j * 0.18, j * 0.9
             );
           }
@@ -1502,17 +1744,26 @@ export function createMonsterAI(Base, THREE, CFG) {
     }
 
     fadeTrail() {
+      if (!this.trail.length) return;
       const goo = this.g.goo;
-      for (let i = this.trail.length - 1; i >= 0; i--) {
+      let expiredCount = 0;
+
+      for (let i = 0; i < this.trail.length; i++) {
         const t = this.trail[i], life = this.age - t.time;
-        const scale = Math.max(0, 1 - life / TRAIL_LIFETIME);
-        goo.q.setFromAxisAngle(goo.up, t.yaw);
-        goo.p.set(t.x, 0.02, t.z);
-        goo.s.set(t.size * scale, 1, t.size * 0.65 * scale);
-        goo.m.compose(goo.p, goo.q, goo.s);
-        goo.mesh.setMatrixAt(t.slot, goo.m);
-        if (life >= TRAIL_LIFETIME) this.trail.splice(i, 1);
+        if (life >= TRAIL_LIFETIME) {
+          goo.m.makeScale(0, 0, 0);
+          goo.mesh.setMatrixAt(t.slot, goo.m);
+          expiredCount++;
+        } else {
+          const scale = 1 - life / TRAIL_LIFETIME;
+          goo.q.setFromAxisAngle(goo.up, t.yaw);
+          goo.p.set(t.x, 0.02, t.z);
+          goo.s.set(t.size * scale, 1, t.size * 0.65 * scale);
+          goo.m.compose(goo.p, goo.q, goo.s);
+          goo.mesh.setMatrixAt(t.slot, goo.m);
+        }
       }
+      if (expiredCount > 0) this.trail.splice(0, expiredCount);
       goo.mesh.instanceMatrix.needsUpdate = true;
     }
 
@@ -1532,15 +1783,25 @@ export function createMonsterAI(Base, THREE, CFG) {
       // ── Director AI ──
       this.updateDirector(dt);
 
+      // ── Throttled Trail Fade ──
+      if ((this.trailFadeT -= dt) <= 0) {
+        this.trailFadeT = TRAIL_FADE_INTERVAL;
+        this.fadeTrail();
+      }
+
       // ── Memory decay ──
       if ((this.decayT -= dt) <= 0) {
         this.decayT = 1;
         for (const [id, r] of this.memory) {
-          for (const key in r) r[key] *= 0.992;
-          if (Object.values(r).every(v => v < 0.01)) this.memory.delete(id);
+          r.route *= 0.992; r.hide *= 0.992; r.follow *= 0.992; r.deaths *= 0.992;
+          if (r.route < 0.01 && r.hide < 0.01 && r.follow < 0.01 && r.deaths < 0.01) {
+            this.memory.delete(id);
+          }
         }
         for (let i = 0; i < 4; i++) this.escape[i] *= 0.992;
-        for (const key in this.habits) this.habits[key] *= 0.992;
+        this.habits.follow *= 0.992;
+        this.habits.hide   *= 0.992;
+        this.habits.deaths *= 0.992;
         for (const [id, r] of this.tracks) if (this.age - r.time > 30) this.tracks.delete(id);
       }
 
@@ -1549,7 +1810,6 @@ export function createMonsterAI(Base, THREE, CFG) {
       this.flickerWarningTick(dt);
 
       // ── Camera visibility tracking (Spotted -> Flee) ──
-      // Tracks if the player's direct sightline lands on the monster
       let inView = false, pDist = 0, pCam = null;
       if (this.g.camera && !this.g.dead && this.active) {
         const c = this.g.camera.position;
@@ -1566,15 +1826,20 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (inView) this.seenT += dt;
       else this.seenT = Math.max(0, this.seenT - dt * 2);
 
-      // Spotted! Run away very fast until out of sight (game.js dart/retreat integration)
       if (inView && this.seenT > 0.6 && pDist > 8 && !this._hunt && !this._fury && this.mode !== 'CHASE' && this.mode !== 'AMBUSH') {
-         this._hunt = { kind: 'flee', id: this.target || (this.g.mp?.peer?.id || 'local'), x: pCam.x, z: pCam.z, cell: this.cellId(pCam.x, pCam.z), until: this.age + 4 };
-         this.change('STALK');
-         this.retreat = true;
-         this.freeze = 0; this.pauseT = 0; this.stateT = 0;
-         this.path.length = 0; this.goal = -1; this.planT = 0;
-         this.seenT = 0;
-         if (this.g.audio?.whoosh) this.soundAt('dart'); // Audible phantom rush
+        this._hunt = {
+          kind: 'flee',
+          id: this.target || (this.g.mp?.peer?.id || 'local'),
+          x: pCam.x, z: pCam.z,
+          cell: this.cellId(pCam.x, pCam.z),
+          until: this.age + 4
+        };
+        this.change('STALK');
+        this.retreat = true;
+        this.freeze = 0; this.pauseT = 0; this.stateT = 0;
+        this.path.length = 0; this.goal = -1; this.planT = 0;
+        this.seenT = 0;
+        if (this.g.audio?.whoosh) this.soundAt('dart');
       }
 
       // ── Priority overlays ──
@@ -1585,12 +1850,12 @@ export function createMonsterAI(Base, THREE, CFG) {
       // ── Perception ──
       if ((this.senseT -= dt) <= 0) {
         this.senseT = SENSE_INTERVAL;
-        this.fadeTrail();
         if (this.active) this.sense();
       }
       if (!this.active) { if ((this.respawn -= dt) <= 0) this.spawn(); return; }
 
       // ── Behavior overlays ──
+      this.psychologicalTick(dt);
       if (this.lureTick(dt)) return;
       if (this.hallwayStareTick(dt)) return;
       if (this.cornerPeekTick(dt)) return;
@@ -1605,7 +1870,6 @@ export function createMonsterAI(Base, THREE, CFG) {
       if (this.mode === 'SEARCH' && this.stateT > SEARCH_TIMEOUT) {
         this.change(Math.random() < 0.75 + Math.min(0.1, this.habits.follow * 0.02) ? 'AMBUSH' : 'PATROL');
       }
-      // Director AI: patrol→ambush faster when aggressive
       const patrolChangeT = PATROL_CHANGE_TIME - this._aggression * 4;
       if (this.mode === 'PATROL' && this.stateT > patrolChangeT && Math.random() < dt * 0.16)
         this.change('AMBUSH');
@@ -1623,8 +1887,8 @@ export function createMonsterAI(Base, THREE, CFG) {
         if (this.mode === 'STALK' && !this.retreat) {
           if (this.tryCornerPeek()) { /* handled next frame */ }
           else {
-            const c = this.g.world.cell(this.pos.x, this.pos.z);
-            const open = this.openCount(c.x, c.y);
+            const cx = Math.round(this.pos.x * INV_CELL), cz = Math.round(this.pos.z * INV_CELL);
+            const open = this.openCount(cx, cz);
             if (open <= 2 && Math.random() < 0.45) {
               this.retreat = true;
               this._stalkT = this.age + 2.5 + Math.random() * 2;
@@ -1642,8 +1906,6 @@ export function createMonsterAI(Base, THREE, CFG) {
 
       // ── Fake sounds — Director AI modulates frequency ──
       if (this.fakeT <= 0 && this.mode !== 'CHASE') {
-        // Let the world go unnaturally quiet after a scare, then resume with a
-        // single misleading sound. This avoids constant noise and builds tension.
         if (this.age >= this._quietPhaseUntil && this._lastScareTime > 0
           && this.age - this._lastScareTime < 7 && Math.random() < 0.28) {
           this._quietPhaseUntil = this.age + 4 + Math.random() * 4;
@@ -1653,28 +1915,34 @@ export function createMonsterAI(Base, THREE, CFG) {
             * (1 - this._aggression * 0.3);
           const id = this.goal, n = this.g.world.n;
           if (id >= 0) {
-            const cx = (id / n | 0), cz = id % n;
-            // Offset the lure into a nearby valid cell where possible, rather
-            // than making every fake sound originate at the monster's goal.
-            const candidates = DIRS.map(([dx, dz]) => [cx + dx * 2, cz + dz * 2])
-              .filter(([x, z]) => this.g.world.grid[x]?.[z] === 0);
-            const pick = candidates.length && Math.random() < 0.55
-              ? candidates[(Math.random() * candidates.length) | 0] : [cx, cz];
-            this.soundAt('fake', pick[0] * CELL, pick[1] * CELL);
+            const cx = (id / n) | 0, cz = id % n;
+            let pickX = cx, pickZ = cz;
+            if (Math.random() < 0.55) {
+              let cLen = 0;
+              const candX = [0, 0, 0, 0], candZ = [0, 0, 0, 0];
+              for (let i = 0; i < 4; i++) {
+                const nx = cx + DIRS[i][0] * 2, nz = cz + DIRS[i][1] * 2;
+                if (this._isFloor(nx, nz)) { candX[cLen] = nx; candZ[cLen] = nz; cLen++; }
+              }
+              if (cLen > 0) {
+                const idx = (Math.random() * cLen) | 0;
+                pickX = candX[idx]; pickZ = candZ[idx];
+              }
+            }
+            this.soundAt('fake', pickX * CELL, pickZ * CELL);
           }
         }
       }
 
-      // ── Speed with chase acceleration ──
+      // ── Speed with chase acceleration & Dead-End Executioner ──
       const obs = this.observed.get(this.target);
       const chaseSpeed = obs?.speed > 0.1 ? Math.min(CFG.RUN, obs.speed) : CFG.WALK;
       let speed;
 
       if (this.mode === 'CHASE') {
-        // Acceleration curve: ramp up instead of instant max speed
         this._chaseAccelT = Math.min(this._chaseAccelT + dt, CHASE_ACCEL_TIME);
-        const eased = (this._chaseAccelT / CHASE_ACCEL_TIME) ** 2; // quadratic ease-in
-        speed = CFG.WALK + (chaseSpeed - CFG.WALK) * eased;
+        const ratio = this._chaseAccelT / CHASE_ACCEL_TIME;
+        speed = this.getChaseSpeed(CFG.WALK + (chaseSpeed - CFG.WALK) * (ratio * ratio));
       } else if (this.mode === 'STALK') {
         speed = this.retreat ? CFG.RUN * STALK_RETREAT_MULT : CFG.WALK * 0.95;
       } else {
@@ -1723,7 +1991,7 @@ export function createMonsterAI(Base, THREE, CFG) {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // RENDERING & VISUAL EFFECTS
+    // RENDERING & VISUAL EFFECTS (DOM-Cached & Dirty-Checked)
     // ═════════════════════════════════════════════════════════════════════════
 
     renderLocal(dt) {
@@ -1735,8 +2003,11 @@ export function createMonsterAI(Base, THREE, CFG) {
 
       // ── Procedural head-tracking ──
       if (this.body?.skeleton) {
-        const headBone = this.body.skeleton.getBoneByName?.('Head')
-          || this.body.skeleton.getBoneByName?.('head');
+        if (this._headBone === undefined) {
+          this._headBone = this.body.skeleton.getBoneByName?.('Head')
+            || this.body.skeleton.getBoneByName?.('head') || null;
+        }
+        const headBone = this._headBone;
         if (headBone) {
           let nearestP = null, nearestD = Infinity;
           this.players((id, p) => {
@@ -1749,71 +2020,88 @@ export function createMonsterAI(Base, THREE, CFG) {
             const bodyYaw = Math.atan2(this.dir.x, this.dir.z);
             let headTurn = targetYaw - bodyYaw;
             headTurn = Math.atan2(Math.sin(headTurn), Math.cos(headTurn));
-            headTurn = Math.max(-1.05, Math.min(1.05, headTurn)); // ±60°
-            headBone.rotation.y = headBone.rotation.y * 0.85 + headTurn * 0.15; // smooth lerp
+            headTurn = Math.max(-1.05, Math.min(1.05, headTurn));
+            headBone.rotation.y = headBone.rotation.y * 0.85 + headTurn * 0.15;
           }
         }
       }
 
+      this._cacheDom();
       if (!g.dead) this.glitchSpike(dt, this.fury);
 
-      const el = typeof document !== 'undefined' ? document.getElementById('danger') : null;
+      const el = this._dangerEl;
       if (el) {
-        el.style.opacity = !g.dead && this.mode === 'CHASE'
-          ? String(Math.max(0, (14 - d) / 14) * 0.85) : '0';
+        const opStr = !g.dead && this.mode === 'CHASE'
+          ? ((Math.max(0, (14 - d) / 14) * 0.85).toFixed(2)) : '0';
+        if (opStr !== this._lastDangerOp) {
+          el.style.opacity = opStr;
+          this._lastDangerOp = opStr;
+        }
       }
 
-      // ── Distance-based screen distortion ──
       this.distanceDistortion(d);
     }
 
-    /** Distance-based screen warp — closer = more distorted. */
     distanceDistortion(d) {
-      const v = typeof document !== 'undefined' ? document.getElementById('vhs') : null; if (!v) return;
+      const v = this._vhsEl; if (!v) return;
       const inactive = d > 20 || this.g.dead || !Number.isFinite(d);
       if (inactive) {
-        if (this._distanceOpacityActive) v.style.opacity = '';
-        this._distanceOpacityActive = false;
+        if (this._distanceOpacityActive) {
+          v.style.opacity = '';
+          this._lastVhsOp = '';
+          this._distanceOpacityActive = false;
+        }
         this._lastVisibleDistance = d;
         return;
       }
 
       const proximity = Math.max(0, 1 - d / 20);
       const warp = proximity * proximity * 0.3;
-      // Let the fury/glitch layer own the display while its effect is stronger.
       if (this._glitch > warp) {
-        if (this._distanceOpacityActive) v.style.opacity = '';
-        this._distanceOpacityActive = false;
+        if (this._distanceOpacityActive) {
+          v.style.opacity = '';
+          this._lastVhsOp = '';
+          this._distanceOpacityActive = false;
+        }
         this._lastVisibleDistance = d;
         return;
       }
       if (warp > 0.01) {
         const noise = Math.random() * warp * 0.35;
-        v.style.opacity = String(Math.min(1, 0.3 + warp + noise));
+        const opStr = Math.min(1, 0.3 + warp + noise).toFixed(2);
+        if (opStr !== this._lastVhsOp) {
+          v.style.opacity = opStr;
+          this._lastVhsOp = opStr;
+        }
         this._distanceOpacityActive = true;
       } else if (this._distanceOpacityActive) {
         v.style.opacity = '';
+        this._lastVhsOp = '';
         this._distanceOpacityActive = false;
       }
       this._lastVisibleDistance = d;
     }
 
-    /** Fury glitch with chromatic aberration scaling. */
     glitchSpike(dt, fury) {
-      const v = typeof document !== 'undefined' ? document.getElementById('vhs') : null; if (!v) return;
+      const v = this._vhsEl; if (!v) return;
       const target = Math.max(0, Math.min(1, (fury || 0) / 1.2));
 
       if (target <= this._glitch) this._glitch = Math.max(target, this._glitch - dt * 0.5);
       else this._glitch = target;
 
       const amt = this._glitch;
-      v.style.filter = amt > 0.02
+      const filterStr = amt > 0.02
         ? `saturate(${(1 + amt * 0.8).toFixed(2)}) contrast(${(1 + amt * 0.5).toFixed(2)})`
         : '';
+      if (filterStr !== this._lastFilterStr) {
+        v.style.filter = filterStr;
+        this._lastFilterStr = filterStr;
+      }
 
-      // Chromatic aberration CSS variable for post-processing
-      if (v.style.setProperty) {
-        v.style.setProperty('--chroma-shift', `${(amt * 3).toFixed(1)}px`);
+      const chromaStr = amt > 0.02 ? `${(amt * 3).toFixed(1)}px` : '0px';
+      if (chromaStr !== this._lastChromaStr && v.style.setProperty) {
+        v.style.setProperty('--chroma-shift', chromaStr);
+        this._lastChromaStr = chromaStr;
       }
 
       if (amt >= 0.99 && !this._glitchShown) {
@@ -1828,9 +2116,13 @@ export function createMonsterAI(Base, THREE, CFG) {
 
     snapshot() {
       const full = this.age >= this.fullT; if (full) this.fullT = this.age + 3;
-      const trail = this.trail
-        .filter(t => full || t.seq > this.trailSent)
-        .map(({ seq, x, z, size, yaw, time }) => ({ seq, x, z, size, yaw, time }));
+      const trail = [];
+      for (let i = 0; i < this.trail.length; i++) {
+        const t = this.trail[i];
+        if (full || t.seq > this.trailSent) {
+          trail.push({ seq: t.seq, x: t.x, z: t.z, size: t.size, yaw: t.yaw, time: t.time });
+        }
+      }
       this.trailSent = this.trailSeq;
       return {
         epoch: this.epoch, age: this.age, target: this.target,
@@ -1851,14 +2143,26 @@ export function createMonsterAI(Base, THREE, CFG) {
       this.age = s.age; this.target = s.target;
       if (s.full) { this.trail = []; this.g.goo.clear(); this.seenTrail = 0; }
       for (const t of s.trail || []) {
-        if (t.seq <= this.seenTrail) continue; this.seenTrail = t.seq;
+        if (t.seq <= this.seenTrail) continue;
+        this.seenTrail = t.seq;
         const slot = this.g.goo.idx;
         this.g.goo.drop(t.x, t.z, t.size, t.size * 0.65, t.yaw);
         this.trail.push({ ...t, slot });
+        if (this.trail.length > TRAIL_MAX_COUNT) {
+          const old = this.trail.shift(), goo = this.g.goo;
+          goo.m.makeScale(0, 0, 0);
+          goo.mesh.setMatrixAt(old.slot, goo.m);
+          goo.mesh.instanceMatrix.needsUpdate = true;
+        }
       }
-      this.fadeTrail(); this.playSound(s.sound);
+      if ((this.trailFadeT -= 1 / 60) <= 0) {
+        this.trailFadeT = TRAIL_FADE_INTERVAL;
+        this.fadeTrail();
+      }
+      this.playSound(s.sound);
       this.fury = s.fury || 0;
       this._aggression = s.aggression || 0.3;
+      this._cacheDom();
       this.glitchSpike(1 / 60, this.fury);
       if (this.fury > 0 && !this._furyDim) this.dimWorld();
       else if (this.fury <= 0 && this._furyDim) this.restoreWorld();
