@@ -1,25 +1,7 @@
 // stress.js
-// Psychological Panic & Stress Director
-//
-// Features:
-// - Camera whiplash detection
-// - Running, movement, dynamo, and recovery stress
-// - Flashlight overuse tracking
-// - Player behavior profiling
-// - Monster proximity awareness
-// - Weighted psychological event selection
-// - Event memory and repetition prevention
-// - Delayed events and anticipation
-// - False reassurance and quiet periods
-// - Safe visual battery interference
-// - Original horror events preserved
-//
-// Compatible with:
-// const stress = new StressSystem(player);
-// stress.update(dt);
-// stress.reset();
-// stress.add(amount);
-// stress.remove(amount);
+// Psychological Panic, Hallucination & False Jumpscare Director
+
+import { JumpscareSystem } from './jumpscare.js';
 
 export class StressSystem {
   constructor(player) {
@@ -28,7 +10,6 @@ export class StressSystem {
     // --------------------------------
     // CORE STRESS
     // --------------------------------
-
     this.value = 0;
     this.maxStress = 100;
     this.lastYaw = null;
@@ -36,84 +17,62 @@ export class StressSystem {
     // --------------------------------
     // ORIGINAL TRACKERS
     // --------------------------------
-
     this.flashlightTime = 0;
     this.standStillTime = 0;
-    this.eventCooldown = 15.0;
+    this.eventCooldown = 12.0;
 
     // --------------------------------
     // STRESS TUNING
     // --------------------------------
+    this.turnThreshold = 2.2;
+    this.turnGain = 7.5;
 
-    this.turnThreshold = 2.0;
-    this.turnGain = 8.0;
+    this.windingGain = 16.0;
+    this.runningGain = 8.5;
+    this.movingGain = 2.0;
+    this.recoveryGain = 4.5;
 
-    this.windingGain = 18.0;
-    this.runningGain = 10.0;
-    this.movingGain = 4.0;
-    this.recoveryGain = 1.5;
-
-    // Stress caused by environmental danger.
-    this.proximityGain = 0;
+    this.proximityGain = 18.0;
 
     // --------------------------------
     // EVENT DIRECTOR
     // --------------------------------
-
     this.pendingEvents = [];
     this.eventHistory = new Map();
 
     this.lastEventType = null;
     this.lastMajorEventTime = -1000;
-
     this.directorTime = 0;
 
-    // Higher values mean events are less predictable.
     this.unpredictability = 1.0;
-
-    // The director sometimes chooses not to scare the player.
-    this.quietChance = 0.22;
-
-    // Avoid repeating an event type too soon.
-    this.repeatCooldown = 18.0;
-
-    // Keep major events separated.
+    this.quietChance = 0.18;
+    this.repeatCooldown = 16.0;
     this.majorEventCooldown = 12.0;
 
     // --------------------------------
     // ANTICIPATION
     // --------------------------------
-
     this.anticipation = 0;
     this.anticipationType = null;
-
     this.anticipationTimer = 0;
     this.anticipationDuration = 0;
 
     // --------------------------------
     // PLAYER BEHAVIOR PROFILE
     // --------------------------------
-
     this.profile = {
       totalTurns: 0,
       fastTurns: 0,
-
       sprintTime: 0,
       windingTime: 0,
       flashlightUse: 0,
-
       repeatedBackChecks: 0,
       stationaryTime: 0,
-
       lastTurnDirection: 0,
       lastTurnTime: -1000,
-
       lastBackCheckTime: -1000,
       lastProfileUpdate: 0,
-
       previousTurnSpeed: 0,
-
-      // Decaying behavioral scores.
       turnHabit: 0,
       sprintHabit: 0,
       flashlightHabit: 0,
@@ -121,49 +80,43 @@ export class StressSystem {
     };
 
     // --------------------------------
-    // THREAT TRACKING
+    // THREAT & HEARTBEAT TRACKING
     // --------------------------------
-
     this.monsterDistance = Infinity;
     this.monsterThreat = 0;
-
-    // How long the monster has been close.
     this.closeThreatTime = 0;
-
-    // Time since the monster was last nearby.
     this.timeSinceThreat = 999;
+    this.heartbeatTimer = 0;
 
     // --------------------------------
     // REASSURANCE
     // --------------------------------
-
     this.reassuranceTime = 0;
     this.reassuranceActive = false;
-
-    // A brief calm period after sufficiently intense events.
     this.reassuranceDuration = 0;
 
     // --------------------------------
-    // VISUAL INTERFERENCE
+    // VISUAL & HUD INTERFERENCE
     // --------------------------------
-
-    // This does NOT overwrite the real flashlight battery.
-    // The UI can optionally read this property.
     this.visualBatteryOverride = null;
     this.visualBatteryTimer = 0;
-
-    this.maxVisualBatteryDuration = 0.5;
+    this.maxVisualBatteryDuration = 0.65;
+    this.hudHallucinationTimer = 0;
 
     // --------------------------------
     // "DON'T LOOK BACK" TRACKERS
     // --------------------------------
     this.dlbState = 'inactive';
     this.dlbTimer = 0;
+    this.dlbSurvivalTimer = 0;
     this.dlbOrigin = null;
 
-    // --------------------------------
-    // EVENT STATISTICS
-    // --------------------------------
+    this._fwdX = 0;
+    this._fwdZ = -1;
+    this._barEl = null;
+    this._pctEl = null;
+    this._statusEl = null;
+    this._hookedKill = false;
 
     this.stats = {
       eventsTriggered: 0,
@@ -173,28 +126,59 @@ export class StressSystem {
     };
   }
 
+  _cacheDom() {
+    if (typeof document === 'undefined') return;
+    if (!this._barEl) this._barEl = document.getElementById('bar')?.firstElementChild || null;
+    if (!this._pctEl) this._pctEl = document.getElementById('pct');
+    if (!this._statusEl) this._statusEl = document.getElementById('status');
+
+    // Ensure JumpscareSystem is initialized on game instance
+    const g = this.player?.g;
+    if (g && !this._hookedKill) {
+      this._hookedKill = true;
+      if (!g.jumpscare || typeof g.jumpscare.triggerFalse !== 'function') {
+        g.jumpscare = new JumpscareSystem(g);
+      }
+    }
+  }
+
+  _updateCameraOrientation(camera) {
+    const q = camera.quaternion;
+    const fx = -2 * (q.x * q.z + q.w * q.y);
+    const fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
+    const len = Math.hypot(fx, fz) || 1;
+    this._fwdX = fx / len;
+    this._fwdZ = fz / len;
+    return Math.atan2(this._fwdX, this._fwdZ);
+  }
+
   // ================================================
   // MAIN UPDATE
   // ================================================
 
   update(dt) {
     const p = this.player;
-    const g = p.g;
-
+    const g = p?.g;
     if (!p || !g || !g.camera) return;
 
-    // Prevent huge changes after frame stalls.
-    dt = Math.max(0, Math.min(dt, 0.1));
+    if (g.dead) {
+      if (this.dlbState !== 'inactive') {
+        this.dlbState = 'inactive';
+        if (g.monster) g.monster.freeze = 0;
+      }
+      return;
+    }
 
+    dt = Math.max(0, Math.min(dt, 0.1));
     this.directorTime += dt;
+    this._cacheDom();
 
     const camera = g.camera;
-    const yaw = camera.rotation.y;
+    const yaw = this._updateCameraOrientation(camera);
 
     // --------------------------------
     // CAMERA MOVEMENT / WHIPLASH
     // --------------------------------
-
     let turnSpeed = 0;
     let yawDelta = 0;
 
@@ -203,182 +187,127 @@ export class StressSystem {
         Math.sin(yaw - this.lastYaw),
         Math.cos(yaw - this.lastYaw)
       );
-
       turnSpeed = Math.abs(yawDelta) / Math.max(dt, 0.001);
 
       if (turnSpeed > this.turnThreshold) {
         const excess = turnSpeed - this.turnThreshold;
-
-        // Fast turns increase stress, but extreme speeds
-        // cannot cause an unlimited one-frame spike.
         this.value += Math.min(excess, 8) * this.turnGain * dt;
 
         this.profile.fastTurns++;
-        this.profile.turnHabit = Math.min(
-          1,
-          this.profile.turnHabit + dt * 0.16
-        );
-
+        this.profile.turnHabit = Math.min(1, this.profile.turnHabit + dt * 0.16);
         this.profile.lastTurnDirection = Math.sign(yawDelta);
         this.profile.lastTurnTime = this.directorTime;
 
-        // Detect repeated attempts to check behind.
-        if (
-          Math.abs(yawDelta) > Math.PI * 0.65 &&
-          this.directorTime - this.profile.lastBackCheckTime < 5
-        ) {
-          this.profile.repeatedBackChecks++;
-        }
-
         if (Math.abs(yawDelta) > Math.PI * 0.65) {
+          if (this.directorTime - this.profile.lastBackCheckTime < 5) {
+            this.profile.repeatedBackChecks = Math.min(10, this.profile.repeatedBackChecks + 1);
+          }
           this.profile.lastBackCheckTime = this.directorTime;
         }
       } else {
-        this.profile.turnHabit = Math.max(
-          0,
-          this.profile.turnHabit - dt * 0.025
-        );
+        this.profile.turnHabit = Math.max(0, this.profile.turnHabit - dt * 0.025);
       }
     }
 
-    this.lastYaw = yaw;
+    if (this.profile.repeatedBackChecks > 0) {
+      this.profile.repeatedBackChecks = Math.max(0, this.profile.repeatedBackChecks - dt * 0.08);
+    }
 
+    this.lastYaw = yaw;
     this.profile.totalTurns += Math.abs(yawDelta);
 
     // --------------------------------
     // FLASHLIGHT TRACKING
     // --------------------------------
-
     if (g.flash && g.flash.on && !g.dark) {
       this.flashlightTime += dt;
       this.profile.flashlightUse += dt;
-
-      this.profile.flashlightHabit = Math.min(
-        1,
-        this.profile.flashlightHabit + dt * 0.025
-      );
+      this.profile.flashlightHabit = Math.min(1, this.profile.flashlightHabit + dt * 0.025);
     } else {
-      this.flashlightTime = Math.max(
-        0,
-        this.flashlightTime - dt * 2
-      );
-
-      this.profile.flashlightHabit = Math.max(
-        0,
-        this.profile.flashlightHabit - dt * 0.01
-      );
+      this.flashlightTime = Math.max(0, this.flashlightTime - dt * 2);
+      this.profile.flashlightHabit = Math.max(0, this.profile.flashlightHabit - dt * 0.01);
     }
 
     // --------------------------------
     // STANDING STILL / HIDING
     // --------------------------------
-
     if (!p.moving && !p.winding) {
       this.standStillTime += dt;
       this.profile.stationaryTime += dt;
-
-      this.profile.hidingHabit = Math.min(
-        1,
-        this.profile.hidingHabit + dt * 0.025
-      );
+      this.profile.hidingHabit = Math.min(1, this.profile.hidingHabit + dt * 0.025);
     } else {
       this.standStillTime = 0;
-
-      this.profile.hidingHabit = Math.max(
-        0,
-        this.profile.hidingHabit - dt * 0.02
-      );
+      this.profile.hidingHabit = Math.max(0, this.profile.hidingHabit - dt * 0.02);
     }
 
     // --------------------------------
-    // PLAYER ACTIONS
+    // MONSTER & ENVIRONMENT PROXIMITY
     // --------------------------------
+    this._updateThreat(dt);
 
+    if (this.monsterThreat > 0) {
+      this.value += this.monsterThreat * this.proximityGain * dt;
+      this.closeThreatTime += dt;
+      this.timeSinceThreat = 0;
+    } else {
+      this.closeThreatTime = Math.max(0, this.closeThreatTime - dt * 0.5);
+      this.timeSinceThreat += dt;
+    }
+
+    if (g.dark) {
+      this.value += 9.0 * dt;
+    } else if (g.lighting && g.lighting.maxStress > 0.25) {
+      this.value += g.lighting.maxStress * 6.5 * dt;
+    }
+
+    // --------------------------------
+    // PLAYER ACTIONS & RECOVERY
+    // --------------------------------
     if (p.winding) {
       this.value += this.windingGain * dt;
       this.profile.windingTime += dt;
     } else if (p.running) {
       this.value += this.runningGain * dt;
       this.profile.sprintTime += dt;
-
-      this.profile.sprintHabit = Math.min(
-        1,
-        this.profile.sprintHabit + dt * 0.035
-      );
+      this.profile.sprintHabit = Math.min(1, this.profile.sprintHabit + dt * 0.035);
     } else if (p.moving) {
-      this.value += this.movingGain * dt;
-
-      this.profile.sprintHabit = Math.max(
-        0,
-        this.profile.sprintHabit - dt * 0.02
-      );
+      if (this.monsterThreat > 0.1 || this.value < 28) {
+        this.value += this.movingGain * dt;
+      } else {
+        this.value -= (this.recoveryGain * 0.55) * dt;
+      }
+      this.profile.sprintHabit = Math.max(0, this.profile.sprintHabit - dt * 0.02);
     } else {
       this.value -= this.recoveryGain * dt;
-
-      this.profile.sprintHabit = Math.max(
-        0,
-        this.profile.sprintHabit - dt * 0.02
-      );
-    }
-
-    // --------------------------------
-    // MONSTER PROXIMITY
-    // --------------------------------
-
-    this._updateThreat(dt);
-
-    // Environmental danger increases psychological tension.
-    if (this.monsterThreat > 0) {
-      this.value += this.monsterThreat * this.proximityGain * dt;
-      this.closeThreatTime += dt;
-      this.timeSinceThreat = 0;
-    } else {
-      this.closeThreatTime = Math.max(
-        0,
-        this.closeThreatTime - dt * 0.5
-      );
-
-      this.timeSinceThreat += dt;
+      this.profile.sprintHabit = Math.max(0, this.profile.sprintHabit - dt * 0.02);
     }
 
     // --------------------------------
     // FALSE REASSURANCE
     // --------------------------------
-
     this._updateReassurance(dt);
 
     // --------------------------------
     // STRESS CLAMP
     // --------------------------------
-
-    this.value = Math.max(
-      0,
-      Math.min(this.maxStress, this.value)
-    );
-
+    this.value = Math.max(0, Math.min(this.maxStress, this.value));
     p.stress = this.value;
 
     // --------------------------------
-    // TEMPORARY VISUAL EFFECTS
+    // PHYSIOLOGICAL HEARTBEAT & VISUALS
     // --------------------------------
-
+    this._updateHeartbeat(dt);
     this._updateVisualInterference(dt);
-
-    // --------------------------------
-    // ANTICIPATION QUEUE
-    // --------------------------------
-
     this._updatePendingEvents(dt);
 
     // --------------------------------
     // PSYCHOLOGICAL EVENT DIRECTOR
     // --------------------------------
-
     this.eventCooldown -= dt;
 
     if (
       this.eventCooldown <= 0 &&
-      this.value > 35 &&
+      this.value > 32 &&
       g.monster &&
       g.monster.active &&
       !g.dead
@@ -389,71 +318,95 @@ export class StressSystem {
     // --------------------------------
     // "DON'T LOOK BACK" STATE MACHINE
     // --------------------------------
-    if (this.dlbState !== 'inactive' && g.monster && !g.dead) {
-      const m = g.monster;
-      const c = g.camera.position;
-      
-      const dx = m.pos.x - c.x;
-      const dz = m.pos.z - c.z;
-      const dist = Math.hypot(dx, dz);
-      
-      // Calculate exactly where the player's camera is facing
-      const fwdX = Math.sin(yaw);
-      const fwdZ = Math.cos(yaw);
-      
-      // Dot product: > 0.5 means looking at it. < -0.6 means it's strictly in the blind spot.
-      const lookDot = (dx * fwdX + dz * fwdZ) / (dist || 1);
-      
-      // PHASE 1: The monster is physically navigating the maze to get behind you
-      if (this.dlbState === 'approaching') {
-        this.dlbTimer -= dt;
-        
-        // If it successfully gets within 3.5 units AND is directly behind you without being seen
-        if (dist < 3.5 && lookDot < -0.6) {
-          this.dlbState = 'standoff';
-          this.dlbOrigin = { x: c.x, z: c.z };
-          this.dlbTimer = 0; // Reset timer for audio pulsing
-          
-          // The moment it arrives, play a deep, terrifying rumble
-          if (g.audio.tone) g.audio.tone(45, 2.0, 0.4, 'sawtooth', m.pos);
-        } 
-        // Cancel the event if it takes too long or if the player spots it approaching
-        else if (this.dlbTimer <= 0 || (dist < 8 && lookDot > 0.5)) {
-          this.dlbState = 'inactive';
-        }
-      } 
-      
-      // PHASE 2: It is standing right behind you. Do. Not. Turn. Around.
-      else if (this.dlbState === 'standoff') {
-        // Magnetically lock it exactly 1.8 units behind the camera so it perfectly tracks your movement
-        const backwardYaw = yaw + Math.PI;
-        m.pos.x = c.x + Math.sin(backwardYaw) * 1.8;
-        m.pos.z = c.z + Math.cos(backwardYaw) * 1.8;
-        
-        if (m.dir) m.dir.set(c.x - m.pos.x, 0, c.z - m.pos.z).normalize();
-        m.freeze = 0.5; // Disable normal AI movement
-        
-        // Heartbeat Audio Loop
-        this.dlbTimer += dt;
-        if (this.dlbTimer > 0.8) {
-          this.dlbTimer = 0;
-          if (g.audio.thud) g.audio.thud(c, true); // Deep heartbeat thud
-        }
+    this._updateDontLookBack(dt);
+  }
 
-        // FATAL: The player turned the camera to look at it
-        if (lookDot > 0.3) {
-          this.dlbState = 'inactive';
-          m.freeze = 0;
-          if (g.killPlayer) g.killPlayer();
-        } 
-        // SAFE: The player kept looking forward and successfully walked 4 units away
-        else if (this.dlbOrigin && Math.hypot(c.x - this.dlbOrigin.x, c.z - this.dlbOrigin.z) > 4.0) {
-          this.dlbState = 'inactive';
-          m.freeze = 0;
-          if (m.change) m.change('SEARCH'); // It gives up and wanders off
-          if (g.audio && g.audio.whisper) g.audio.whisper(c, 0); // Creepy audio cue that it vanished
-        }
+  // ================================================
+  // "DON'T LOOK BACK" MECHANIC
+  // ================================================
+
+  _updateDontLookBack(dt) {
+    const g = this.player.g;
+    if (this.dlbState === 'inactive' || !g.monster || !g.monster.active || g.dead) return;
+
+    const m = g.monster;
+    const c = g.camera.position;
+
+    const dx = m.pos.x - c.x;
+    const dz = m.pos.z - c.z;
+    const dist = Math.hypot(dx, dz);
+
+    const lookDot = (dx * this._fwdX + dz * this._fwdZ) / (dist || 1);
+
+    if (this.dlbState === 'approaching') {
+      this.dlbTimer -= dt;
+
+      if (dist < 3.8 && lookDot < -0.55) {
+        this.dlbState = 'standoff';
+        this.dlbOrigin = { x: c.x, z: c.z };
+        this.dlbTimer = 0;
+        this.dlbSurvivalTimer = 8.5;
+
+        if (g.audio?.tone) g.audio.tone(45, 2.0, 0.38, 'sawtooth', m.pos);
+        if (g.audio?.whisper) g.audio.whisper(m.pos, 1.5);
+        if (g.warn) g.warn("DON'T LOOK BACK", 1800);
+      } else if (this.dlbTimer <= 0 || (dist < 8 && lookDot > 0.45)) {
+        this.dlbState = 'inactive';
       }
+    } else if (this.dlbState === 'standoff') {
+      this.dlbSurvivalTimer -= dt;
+
+      const targetX = c.x - this._fwdX * 1.65;
+      const targetZ = c.z - this._fwdZ * 1.65;
+      if (!g.world.collides(targetX, targetZ, 0.2)) {
+        m.pos.x = targetX;
+        m.pos.z = targetZ;
+      }
+
+      if (m.dir) m.dir.set(this._fwdX, 0, this._fwdZ);
+      m.freeze = 0.5;
+      if (m.renderLocal) m.renderLocal(dt);
+
+      // FATAL: Player turned the camera past their shoulder to look at it
+      if (lookDot > 0.25) {
+        this.dlbState = 'inactive';
+        m.freeze = 0;
+        if (g.killPlayer) g.killPlayer();
+        return;
+      }
+
+      const walkedDist = this.dlbOrigin ? Math.hypot(c.x - this.dlbOrigin.x, c.z - this.dlbOrigin.z) : 0;
+      if (walkedDist > 3.8 || this.dlbSurvivalTimer <= 0) {
+        this.dlbState = 'inactive';
+        m.freeze = 0;
+        if (m.change) m.change('SEARCH');
+        m.pauseT = 1.5;
+        if (g.audio?.whisper) g.audio.whisper(c, 0);
+      }
+    }
+  }
+
+  // ================================================
+  // PHYSIOLOGICAL HEARTBEAT
+  // ================================================
+
+  _updateHeartbeat(dt) {
+    const g = this.player.g;
+    if (!g.audio?.thud || g.dead) return;
+
+    const standoff = this.dlbState === 'standoff';
+    if (this.value < 62 && !standoff) {
+      this.heartbeatTimer = 0;
+      return;
+    }
+
+    const intensity = standoff ? 1.0 : Math.max(0, (this.value - 62) / 38);
+    const interval = standoff ? 0.42 : (0.92 - intensity * 0.48);
+
+    this.heartbeatTimer -= dt;
+    if (this.heartbeatTimer <= 0) {
+      this.heartbeatTimer = interval;
+      g.audio.thud(g.camera.position, true);
     }
   }
 
@@ -469,39 +422,21 @@ export class StressSystem {
     this.monsterThreat = 0;
     this.monsterDistance = Infinity;
 
-    if (
-      !monster ||
-      !monster.active ||
-      !g.camera ||
-      g.dead
-    ) {
-      return;
-    }
+    if (!monster || !monster.active || !g.camera || g.dead) return;
 
     const monsterPosition = this._getMonsterPosition(monster);
-
     if (!monsterPosition) return;
 
     const cameraPosition = g.camera.position;
-
     const dx = monsterPosition.x - cameraPosition.x;
     const dz = monsterPosition.z - cameraPosition.z;
-
-    const distance = Math.sqrt(dx * dx + dz * dz);
+    const distance = Math.hypot(dx, dz);
 
     this.monsterDistance = distance;
 
-    // Full threat inside 4 units.
-    // Threat fades out beyond 20 units.
     const near = 4;
-    const far = 20;
-
-    const t = Math.max(
-      0,
-      Math.min(1, (far - distance) / (far - near))
-    );
-
-    // Smoothstep interpolation.
+    const far = 22;
+    const t = Math.max(0, Math.min(1, (far - distance) / (far - near)));
     this.monsterThreat = t * t * (3 - 2 * t);
   }
 
@@ -516,14 +451,11 @@ export class StressSystem {
   _updateReassurance(dt) {
     if (this.reassuranceDuration > 0) {
       this.reassuranceDuration -= dt;
-
       if (this.reassuranceDuration <= 0) {
         this.reassuranceActive = false;
       }
     }
 
-    // If the player is recovering and danger is distant,
-    // allow a genuine calm period.
     if (
       this.value < 50 &&
       this.monsterThreat < 0.15 &&
@@ -532,18 +464,13 @@ export class StressSystem {
     ) {
       this.reassuranceTime += dt;
     } else {
-      this.reassuranceTime = Math.max(
-        0,
-        this.reassuranceTime - dt * 0.5
-      );
+      this.reassuranceTime = Math.max(0, this.reassuranceTime - dt * 0.5);
     }
   }
 
   _beginReassurance() {
     this.reassuranceActive = true;
-
     this.reassuranceDuration = 4 + Math.random() * 8;
-
     this.reassuranceTime = 0;
   }
 
@@ -555,86 +482,42 @@ export class StressSystem {
     const g = this.player.g;
     const level = this.normalized;
 
-    if (
-      !monster ||
-      !monster.active ||
-      g.dead ||
-      this.value < 35
-    ) {
-      return;
-    }
+    if (!monster || !monster.active || g.dead || this.value < 32) return;
 
-    // Do not start a new event while another is waiting
-    // to resolve. This prevents overlapping delayed scares.
     if (this.pendingEvents.length > 0) {
       this.eventCooldown = 1.0 + Math.random() * 1.5;
       return;
     }
 
-    const candidates = this._buildEventCandidates(
-      level,
-      turnSpeed
-    );
-
+    const candidates = this._buildEventCandidates(level, turnSpeed);
     if (candidates.length === 0) {
-      this.eventCooldown = 5 + Math.random() * 5;
+      this.eventCooldown = 4 + Math.random() * 4;
       return;
     }
 
-    // Sometimes nothing happens.
-    // Quiet periods are part of the horror design.
     const dangerBonus = this.monsterThreat * 0.18;
-
-    const quietRoll = Math.random();
-
-    if (
-      quietRoll <
-      Math.max(0.04, this.quietChance - dangerBonus)
-    ) {
+    if (Math.random() < Math.max(0.04, this.quietChance - dangerBonus)) {
       this.stats.quietPeriods++;
-
-      this.eventCooldown = 8 + Math.random() * 12;
-
+      this.eventCooldown = 7 + Math.random() * 9;
       return;
     }
 
     const chosen = this._weightedChoice(candidates);
-
     if (!chosen) {
-      this.eventCooldown = 5.0 + Math.random() * 5.0; 
-      return; 
+      this.eventCooldown = 5.0 + Math.random() * 5.0;
+      return;
     }
 
-    // Longer cooldowns than the original version.
-    // Nearby threats can still create short bursts.
-    const closeThreatBonus = this.monsterThreat > 0.8;
+    const closeThreatBonus = this.monsterThreat > 0.75;
+    this.eventCooldown = closeThreatBonus
+      ? 4.5 + Math.random() * 3.5
+      : 8.0 + Math.random() * 10.0;
 
-    if (closeThreatBonus) {
-      this.eventCooldown = 5 + Math.random() * 4;
-    } else {
-      this.eventCooldown = 9 + Math.random() * 12;
-    }
+    const canAnticipate = chosen.anticipation && level > 0.38 && !this.reassuranceActive;
+    const anticipationChance = 0.35 + level * 0.25;
 
-    // Occasionally create anticipation instead of
-    // delivering the scare immediately.
-    const canAnticipate =
-      chosen.anticipation &&
-      level > 0.4 &&
-      !this.reassuranceActive;
-
-    const anticipationChance =
-      0.35 + level * 0.25;
-
-    if (
-      canAnticipate &&
-      Math.random() < anticipationChance
-    ) {
-      this._scheduleEvent(
-        chosen.type,
-        1.5 + Math.random() * 3.5,
-        chosen.warning
-      );
-
+    if (canAnticipate && Math.random() < anticipationChance) {
+      this._scheduleEvent(chosen.type, 1.2 + Math.random() * 2.8, chosen.warning);
       this.stats.anticipationEvents++;
       return;
     }
@@ -643,49 +526,28 @@ export class StressSystem {
   }
 
   // ================================================
-  // CANDIDATE EVENTS
+  // CANDIDATE EVENTS (Uses add(...) ONLY!)
   // ================================================
 
   _buildEventCandidates(level, turnSpeed) {
     const candidates = [];
 
-    const add = (
-      type,
-      weight,
-      condition,
-      anticipation = false,
-      warning = null
-    ) => {
+    const add = (type, weight, condition, anticipation = false, warning = null) => {
       if (!condition) return;
-
-      const adjustedWeight = this._adjustEventWeight(
-        type,
-        weight
-      );
-
+      const adjustedWeight = this._adjustEventWeight(type, weight);
       if (adjustedWeight > 0) {
-        candidates.push({
-          type,
-          weight: adjustedWeight,
-          anticipation,
-          warning
-        });
+        candidates.push({ type, weight: adjustedWeight, anticipation, warning });
       }
     };
 
     // 1. SENSORY OVERLOAD
-    add(
-      "sensoryOverload",
-      1.0 + level * 1.5,
-      level > 0.95,
-      false
-    );
+    add("sensoryOverload", 1.0 + level * 1.5, level > 0.88, false);
 
     // 2. PARANOIA DROP
     add(
       "paranoiaDrop",
       1.4 + this.profile.hidingHabit,
-      level > 0.4 && this.standStillTime > 2,
+      level > 0.38 && this.standStillTime > 1.8,
       true,
       "distantStep"
     );
@@ -693,8 +555,8 @@ export class StressSystem {
     // 3. FLASHLIGHT BURNOUT
     add(
       "flashlightBurnout",
-      1.0 + this.profile.flashlightHabit,
-      level > 0.6 && this.flashlightTime > 12,
+      1.1 + this.profile.flashlightHabit,
+      level > 0.5 && this.flashlightTime > 10,
       true,
       "flashlightWarning"
     );
@@ -703,7 +565,7 @@ export class StressSystem {
     add(
       "whiplash",
       1.0 + this.profile.turnHabit * 1.5,
-      level > 0.5 && turnSpeed > this.turnThreshold,
+      level > 0.45 && turnSpeed > this.turnThreshold,
       true,
       "distantStep"
     );
@@ -712,7 +574,7 @@ export class StressSystem {
     add(
       "doppelgangerEcho",
       1.0 + level * 0.8,
-      level > 0.4,
+      level > 0.35,
       true,
       "distantStep"
     );
@@ -720,16 +582,16 @@ export class StressSystem {
     // 6. PHANTOM GLANCE
     add(
       "phantomGlance",
-      0.7 + this.profile.repeatedBackChecks * 0.1,
-      level > 0.35 && turnSpeed > this.turnThreshold,
+      0.8 + this.profile.repeatedBackChecks * 0.15,
+      level > 0.32 && turnSpeed > this.turnThreshold,
       false
     );
 
     // 7. NEARBY THREAT
     add(
       "nearbyThreat",
-      0.8 + this.monsterThreat * 2,
-      this.monsterThreat > 0.4,
+      0.9 + this.monsterThreat * 2,
+      this.monsterThreat > 0.35,
       true,
       "distantStep"
     );
@@ -737,28 +599,66 @@ export class StressSystem {
     // 8. BEHAVIORAL PARANOIA
     add(
       "behavioralParanoia",
-      0.8 + this.profile.turnHabit,
-      level > 0.45 &&
-        this.profile.repeatedBackChecks >= 2,
+      0.9 + this.profile.turnHabit,
+      level > 0.4 && this.profile.repeatedBackChecks >= 1.5,
       true,
       "distantStep"
+    );
+
+    // 9. FALSE REASSURANCE
+    add(
+      "falseReassurance",
+      0.5,
+      level > 0.5 && this.monsterThreat < 0.4 && this.timeSinceThreat > 3,
+      false
     );
 
     // 10. DON'T LOOK BACK
     add(
       "dontLookBack",
-      1.5,
-      level > 0.85 && !this.player.moving && this.dlbState === 'inactive',
+      1.6,
+      level > 0.78 && !this.player.moving && this.dlbState === 'inactive',
       false
     );
 
-    // 9. THE EMPTY RESPONSE
+    // 11. CEILING DRIP
     add(
-      "falseReassurance",
-      0.5,
-      level > 0.5 &&
-        this.monsterThreat < 0.4 &&
-        this.timeSinceThreat > 3,
+      "ceilingDrip",
+      1.1 + level * 0.6,
+      level > 0.42 && !this.player.running,
+      false
+    );
+
+    // 12. PARANOIA HUD CORRUPTION
+    add(
+      "paranoiaHudGlitch",
+      1.2 + level * 0.8,
+      level > 0.52,
+      false
+    );
+
+    // 13. FALSE JUMPSCARE — PHANTOM 3D STALK & CORRIDOR CHARGE
+    add(
+      "falseJumpscareLunge",
+      1.4 + level * 1.6,
+      level > 0.58 && this.monsterDistance > 8,
+      true,
+      "flashlightWarning"
+    );
+
+    // 14. FALSE JUMPSCARE — 3D BLINDSPOT SHOULDER GRAB
+    add(
+      "falseJumpscareGrab",
+      1.5 + this.profile.turnHabit * 1.4,
+      level > 0.48 && (turnSpeed > this.turnThreshold * 0.85 || this.standStillTime > 2.5),
+      false
+    );
+
+    // 15. FALSE JUMPSCARE — PANIC FLOOR DRAG HALLUCINATION
+    add(
+      "falseJumpscareTrip",
+      1.3 + this.profile.sprintHabit * 1.5,
+      level > 0.72 && this.player.moving,
       false
     );
 
@@ -771,22 +671,16 @@ export class StressSystem {
 
   _adjustEventWeight(type, baseWeight) {
     const last = this.eventHistory.get(type);
-
     if (!last) return baseWeight;
 
     const elapsed = this.directorTime - last.time;
-
-    // Hard suppression for very recent repetitions.
     if (elapsed < 5) return 0;
 
-    // Gradually restore probability over time.
     if (elapsed < this.repeatCooldown) {
       const recovery = elapsed / this.repeatCooldown;
-
       return baseWeight * recovery * 0.25;
     }
 
-    // Penalize the last event to encourage variety.
     if (type === this.lastEventType) {
       return baseWeight * 0.35;
     }
@@ -796,21 +690,14 @@ export class StressSystem {
 
   _weightedChoice(candidates) {
     let total = 0;
-
-    for (const candidate of candidates) {
-      total += candidate.weight;
-    }
-
+    for (let i = 0; i < candidates.length; i++) total += candidates[i].weight;
     if (total <= 0) return null;
 
     let roll = Math.random() * total;
-
-    for (const candidate of candidates) {
-      roll -= candidate.weight;
-
-      if (roll <= 0) return candidate;
+    for (let i = 0; i < candidates.length; i++) {
+      roll -= candidates[i].weight;
+      if (roll <= 0) return candidates[i];
     }
-
     return candidates[candidates.length - 1];
   }
 
@@ -823,13 +710,10 @@ export class StressSystem {
 
     this.lastEventType = type;
     this.lastMajorEventTime = this.directorTime;
-
     this.stats.eventsTriggered++;
 
-    // Prevent unbounded growth.
     if (this.eventHistory.size > 32) {
       const oldest = this.eventHistory.keys().next().value;
-
       this.eventHistory.delete(oldest);
     }
   }
@@ -839,7 +723,6 @@ export class StressSystem {
   // ================================================
 
   _scheduleEvent(type, delay, warning = null) {
-    // Only one pending major event at a time.
     this.pendingEvents.push({
       type,
       remaining: delay,
@@ -854,459 +737,269 @@ export class StressSystem {
   }
 
   _updatePendingEvents(dt) {
-  if (this.pendingEvents.length === 0) {
-    this.anticipation = Math.max(
-      0,
-      this.anticipation - dt * 0.5
-    );
-    return;
-  }
+    if (this.pendingEvents.length === 0) {
+      this.anticipation = Math.max(0, this.anticipation - dt * 0.5);
+      return;
+    }
 
-  // Update every queued event independently.
-  for (let i = this.pendingEvents.length - 1; i >= 0; i--) {
-    const event = this.pendingEvents[i];
-    event.remaining -= dt;
+    for (let i = this.pendingEvents.length - 1; i >= 0; i--) {
+      const event = this.pendingEvents[i];
 
-    if (event.type === "echoFollowup") {
+      if (!event.warned && event.warning) {
+        event.warned = true;
+        this._playWarning(event.warning);
+      }
+
+      event.remaining -= dt;
+
+      if (event.type === "echoFollowup") {
+        if (event.remaining > 0) continue;
+        this.pendingEvents.splice(i, 1);
+
+        const g = this.player.g;
+        if (g && !g.dead && g.monster?.active && g.monster.soundAt) {
+          g.monster.soundAt("mimic", event.x, event.z);
+        }
+        continue;
+      }
+
       if (event.remaining > 0) continue;
 
       this.pendingEvents.splice(i, 1);
+      this.anticipation = 0;
+      this.anticipationType = null;
 
       const g = this.player.g;
+      if (!g || g.dead || !g.monster?.active) continue;
 
-      if (
-        g &&
-        !g.dead &&
-        g.monster &&
-        g.monster.active &&
-        g.monster.soundAt
-      ) {
-        g.monster.soundAt(
-          "mimic",
-          event.x,
-          event.z
-        );
+      if (this.monsterThreat < 0.05 && this.value < 40 && Math.random() < 0.45) {
+        this.stats.eventsSuppressed++;
+        continue;
       }
 
-      continue;
+      this._executeEvent(event.type, g.monster, 0);
     }
 
-    // Anticipation events are processed below.
-    if (event.remaining > 0) continue;
-
-    this.pendingEvents.splice(i, 1);
-
-    this.anticipation = 0;
-    this.anticipationType = null;
-
-    const g = this.player.g;
-
-    if (
-      !g ||
-      g.dead ||
-      !g.monster ||
-      !g.monster.active
-    ) {
-      continue;
+    if (this.pendingEvents.length === 0) {
+      this.anticipation = 0;
+      this.anticipationType = null;
+      return;
     }
 
-    if (
-      this.monsterThreat < 0.05 &&
-      this.value < 42 &&
-      Math.random() < 0.55
-    ) {
-      this.stats.eventsSuppressed++;
-      continue;
+    const anticipationEvent = this.pendingEvents.find(e => e.type !== "echoFollowup");
+    if (anticipationEvent) {
+      this.anticipationTimer = Math.max(0, anticipationEvent.remaining);
+      this.anticipation = Math.max(
+        0,
+        Math.min(1, anticipationEvent.remaining / Math.max(this.anticipationDuration, 0.001))
+      );
     }
-
-    this._executeEvent(event.type, g.monster, 0);
   }
-
-  if (this.pendingEvents.length === 0) {
-    this.anticipation = 0;
-    this.anticipationType = null;
-    return;
-  }
-
-  const anticipationEvent = this.pendingEvents.find(
-    event => event.type !== "echoFollowup"
-  );
-
-  if (anticipationEvent) {
-    this.anticipationTimer = Math.max(
-      0,
-      anticipationEvent.remaining
-    );
-
-    this.anticipation = Math.max(
-      0,
-      Math.min(
-        1,
-        anticipationEvent.remaining /
-          Math.max(this.anticipationDuration, 0.001)
-      )
-    );
-  }
-}
 
   _playWarning(type) {
     const g = this.player.g;
-
     if (!g || g.dead || !g.camera) return;
 
     const c = g.camera.position;
 
     switch (type) {
       case "distantStep": {
-        // Quiet cue, not a full scare.
-        if (g.monster && g.monster.soundAt) {
-          const yaw = g.camera.rotation.y + Math.PI;
-
-          const x = c.x + Math.sin(yaw) * 10;
-          const z = c.z + Math.cos(yaw) * 10;
-
+        if (g.monster?.soundAt) {
+          const x = c.x - this._fwdX * 10;
+          const z = c.z - this._fwdZ * 10;
           g.monster.soundAt("mimic", x, z);
         }
-
         break;
       }
-
       case "flashlightWarning": {
-        if (
-          g.monster &&
-          g.monster.startFlickerWarning
-        ) {
+        if (g.monster?.startFlickerWarning) {
           g.monster.startFlickerWarning();
         }
-
         break;
       }
     }
   }
 
   // ================================================
-  // EVENT EXECUTION
+  // EVENT EXECUTION (switch / case goes HERE!)
   // ================================================
 
   _executeEvent(type, monster, turnSpeed = 0) {
     const p = this.player;
     const g = p.g;
+    if (!g || !g.camera || g.dead || !monster || !monster.active) return;
 
-    if (
-      !g ||
-      !g.camera ||
-      g.dead ||
-      !monster ||
-      !monster.active
-    ) {
-      return;
-    }
-
-    const level = this.normalized;
     const c = g.camera.position;
-
     this._rememberEvent(type);
 
     switch (type) {
-      // --------------------------------
-      // 1. SENSORY OVERLOAD
-      // --------------------------------
-
       case "sensoryOverload": {
-        if (g.audio && g.audio.whisper) {
-          g.audio.whisper(c, 0);
-        }
-
-        if (g.glitch) {
-          g.glitch();
-        }
-
-        if (monster.addFury) {
-          monster.addFury(p.id || "local", 0.15);
-        }
-
+        if (g.audio?.whisper) g.audio.whisper(c, 0);
+        if (g.glitch) g.glitch();
+        if (monster.addFury) monster.addFury(g.mp?.peer?.id || "local", 0.15);
         break;
       }
-
-      // --------------------------------
-      // 2. PARANOIA DROP
-      // --------------------------------
 
       case "paranoiaDrop": {
-        const backwardYaw =
-          g.camera.rotation.y + Math.PI;
+        const dropX = c.x - this._fwdX * 2.0;
+        const dropZ = c.z - this._fwdZ * 2.0;
 
-        const dropX =
-          c.x + Math.sin(backwardYaw) * 2;
-
-        const dropZ =
-          c.z + Math.cos(backwardYaw) * 2;
-
-        if (
-          g.world &&
-          g.world.collides &&
-          !g.world.collides(dropX, dropZ, 0.1)
-        ) {
-          if (g.goo && g.goo.pool) {
-            g.goo.pool(dropX, dropZ, 0.8);
-          }
-
-          if (monster.soundAt) {
-            monster.soundAt(
-              "mimic",
-              dropX,
-              dropZ
-            );
-          }
+        if (g.world && !g.world.collides(dropX, dropZ, 0.1)) {
+          if (g.goo?.pool) g.goo.pool(dropX, dropZ, 0.85);
+          if (monster.soundAt) monster.soundAt("mimic", dropX, dropZ);
         }
-
         break;
       }
-
-      // --------------------------------
-      // 3. FLASHLIGHT BURNOUT
-      // --------------------------------
 
       case "flashlightBurnout": {
-        if (monster.startFlickerWarning) {
-          monster.startFlickerWarning();
-        }
-
-        // Trigger a brief visual interference without
-        // overwriting the actual battery charge.
-        this._setVisualBatteryOverride(
-          0.02,
-          0.4
-        );
-
+        if (monster.startFlickerWarning) monster.startFlickerWarning();
+        this._setVisualBatteryOverride(0.02, 0.55);
+        if (g.audio?.click) g.audio.click();
         break;
       }
-
-      // --------------------------------
-      // 4. WHIPLASH
-      // --------------------------------
 
       case "whiplash": {
-        const backwardYaw =
-          g.camera.rotation.y + Math.PI;
-
-        const fakeX =
-          c.x + Math.sin(backwardYaw) * 15;
-
-        const fakeZ =
-          c.z + Math.cos(backwardYaw) * 15;
-
-        if (monster.soundAt) {
-          monster.soundAt(
-            "mimic",
-            fakeX,
-            fakeZ
-          );
-        }
-
+        const fakeX = c.x - this._fwdX * 12;
+        const fakeZ = c.z - this._fwdZ * 12;
+        if (monster.soundAt) monster.soundAt("mimic", fakeX, fakeZ);
         break;
       }
-
-      // --------------------------------
-      // 5. DOPPELGANGER ECHO
-      // --------------------------------
 
       case "doppelgangerEcho": {
-        const side =
-          Math.random() < 0.5 ? -1 : 1;
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const rightX = -this._fwdZ * side;
+        const rightZ = this._fwdX * side;
+        const echoX = c.x + rightX * 4.5;
+        const echoZ = c.z + rightZ * 4.5;
 
-        const echoX = c.x + side * 4;
-        const echoZ = c.z + side * 4;
-
-        // The second echo is deliberately delayed.
-        // It is processed through the update loop instead
-        // of setTimeout, so it can be cancelled on reset.
         this.pendingEvents.push({
           type: "echoFollowup",
-          remaining: 0.5 + Math.random() * 0.4,
-          x: echoX,
-          z: echoZ,
+          remaining: 0.42 + Math.random() * 0.25,
+          x: echoX - this._fwdX * 1.5,
+          z: echoZ - this._fwdZ * 1.5,
           warned: true
         });
 
         this.pendingEvents.push({
           type: "echoFollowup",
-          remaining: 1.0 + Math.random() * 0.5,
-          x: echoX,
-          z: echoZ,
+          remaining: 0.88 + Math.random() * 0.3,
+          x: echoX - this._fwdX * 3.0,
+          z: echoZ - this._fwdZ * 3.0,
           warned: true
         });
 
-        if (monster.soundAt) {
-          monster.soundAt(
-            "mimic",
-            echoX,
-            echoZ
-          );
-        }
-
+        if (monster.soundAt) monster.soundAt("mimic", echoX, echoZ);
         break;
       }
-
-      // --------------------------------
-      // 6. PHANTOM GLANCE
-      // --------------------------------
 
       case "phantomGlance": {
-        if (g.glitch) {
-          g.glitch();
-        }
-
-        if (g.audio && g.audio.whisper) {
-          g.audio.whisper(c, 0);
-        }
-
-        this._setVisualBatteryOverride(
-          Math.random() * 0.3,
-          0.2
-        );
-
+        if (g.glitch) g.glitch();
+        if (g.audio?.whisper) g.audio.whisper(c, 0);
+        this._setVisualBatteryOverride(Math.random() * 0.25, 0.3);
         break;
       }
-
-      // --------------------------------
-      // 7. NEARBY THREAT
-      // --------------------------------
 
       case "nearbyThreat": {
-        // A sound behind the player, adjusted by threat.
-        const yaw =
-          g.camera.rotation.y + Math.PI;
+        const distance = 4.5 + Math.random() * 6 * (1 - this.monsterThreat);
+        const x = c.x - this._fwdX * distance;
+        const z = c.z - this._fwdZ * distance;
 
-        const distance =
-          5 + Math.random() * 7 *
-          (1 - this.monsterThreat);
-
-        const x =
-          c.x + Math.sin(yaw) * distance;
-
-        const z =
-          c.z + Math.cos(yaw) * distance;
-
-        if (monster.soundAt) {
-          monster.soundAt("mimic", x, z);
+        if (monster.soundAt) monster.soundAt("mimic", x, z);
+        if (this.monsterThreat > 0.8 && monster.addFury) {
+          monster.addFury(g.mp?.peer?.id || "local", 0.05);
         }
-
-        // Strong nearby threat can subtly intensify hunting.
-        if (
-          this.monsterThreat > 0.8 &&
-          monster.addFury
-        ) {
-          monster.addFury(
-            p.id || "local",
-            0.05
-          );
-        }
-
         break;
       }
-
-      // --------------------------------
-      // 8. BEHAVIORAL PARANOIA
-      // --------------------------------
 
       case "behavioralParanoia": {
-        // Repeatedly checking behind causes a sound
-        // to occur somewhere the player isn't looking.
-        const direction =
-          this.profile.lastTurnDirection || 1;
+        const dir = this.profile.lastTurnDirection || 1;
+        const sideX = -this._fwdZ * dir;
+        const sideZ = this._fwdX * dir;
+        const distance = 7 + Math.random() * 5;
 
-        const yaw =
-          g.camera.rotation.y +
-          direction * Math.PI * 0.5;
-
-        const distance = 8 + Math.random() * 6;
-
-        const x =
-          c.x + Math.sin(yaw) * distance;
-
-        const z =
-          c.z + Math.cos(yaw) * distance;
-
-        if (monster.soundAt) {
-          monster.soundAt("mimic", x, z);
-        }
-
+        const x = c.x + sideX * distance;
+        const z = c.z + sideZ * distance;
+        if (monster.soundAt) monster.soundAt("mimic", x, z);
         break;
       }
-
-      // --------------------------------
-      // 10. DON'T LOOK BACK
-      // --------------------------------
-
-      case "dontLookBack": {
-        // Put the mechanic into the organically 'approaching' phase
-        this.dlbState = 'approaching';
-        this.dlbTimer = 25.0; // The monster has 25 seconds to organically sneak up
-        
-        // Command the monster's AI to stop retreating and start stalking the player
-        if (monster.change) monster.change('STALK');
-        monster.retreat = false; 
-        break;
-      }
-
-      // --------------------------------
-      // 9. FALSE REASSURANCE
-      // --------------------------------
 
       case "falseReassurance": {
-        // Nothing visibly attacks the player.
-        // The game deliberately gives them a quiet moment.
         this._beginReassurance();
-
         break;
       }
 
-      // --------------------------------
-      // DELAYED ECHO
-      // --------------------------------
+      case "dontLookBack": {
+        this.dlbState = 'approaching';
+        this.dlbTimer = 25.0;
+        if (monster.change) monster.change('STALK');
+        monster.retreat = false;
+        break;
+      }
 
-      case "echoFollowup": {
-        // Handled in _updatePendingEvents.
+      case "ceilingDrip": {
+        const dripX = c.x + this._fwdX * 1.85;
+        const dripZ = c.z + this._fwdZ * 1.85;
+        if (g.world && !g.world.collides(dripX, dripZ, 0.15)) {
+          if (g.goo?.drop) g.goo.drop(dripX, dripZ, 1.3, 1.1);
+          if (g.audio?.pop) {
+            monster.scratch.set(dripX, 3.0, dripZ);
+            g.audio.pop(monster.scratch);
+          }
+        }
+        break;
+      }
+
+      case "paranoiaHudGlitch": {
+        if (this._statusEl) {
+          const msgs = [
+            "AUDIO: IT IS BEHIND YOU",
+            "SIGNAL: DO NOT TURN AROUND",
+            "AUDIO: BREATHING DETECTED",
+            "WARNING: PROXIMITY ALERT",
+            "AUDIO: FOOTSTEPS SYNCED"
+          ];
+          this._statusEl.textContent = msgs[(Math.random() * msgs.length) | 0];
+          g._lastSt = '';
+          if (g.glitch) g.glitch();
+        }
+        break;
+      }
+
+      // 13. FALSE 3D JUMPSCARE: 2.9s PHANTOM STALK & CORRIDOR CHARGE (Uses cloned g.monster!)
+      case "falseJumpscareLunge": {
+        g.jumpscare?.triggerFalse?.('phantom_stalk_rush');
+        if (g.warn) g.warn('OPTIC HALLUCINATION // HIGH STRESS', 2600);
+        break;
+      }
+
+      // 14. FALSE 3D JUMPSCARE: 2.7s BLINDSPOT SHOULDER GRAB (Uses cloned g.monster!)
+      case "falseJumpscareGrab": {
+        g.jumpscare?.triggerFalse?.('blindspot_grab');
+        if (g.warn) g.warn('AUDITORY PARANOIA // DO NOT PANIC', 2400);
+        break;
+      }
+
+      // 15. FALSE 3D JUMPSCARE: 3.3s KNOCKED PRONE & FLOOR DRAG HALLUCINATION
+      case "falseJumpscareTrip": {
+        g.jumpscare?.triggerFalse?.('ankle_drag_hallucination');
+        if (g.warn) g.warn('PANIC VERTIGO — SCRAMBLE UP!', 2800);
         break;
       }
     }
   }
 
   // ================================================
-  // PENDING EVENT PROCESSOR
-  // ================================================
-
-  // This replaces setTimeout-based event scheduling.
-  // It is called by update(), including after frame stalls.
-
-  _processPendingFollowups(dt) {
-    // Reserved for future event extensions.
-    // Main pending events are handled in _updatePendingEvents.
-  }
-
-  // ================================================
-  // VISUAL BATTERY INTERFERENCE
+  // VISUAL BATTERY & BEAM INTERFERENCE
   // ================================================
 
   _setVisualBatteryOverride(value, duration) {
-    this.visualBatteryOverride = Math.max(
-      0,
-      Math.min(1, value)
-    );
-
-    this.visualBatteryTimer = Math.min(
-      this.maxVisualBatteryDuration,
-      Math.max(0, duration)
-    );
+    this.visualBatteryOverride = Math.max(0, Math.min(1, value));
+    this.visualBatteryTimer = Math.min(this.maxVisualBatteryDuration, Math.max(0, duration));
 
     const g = this.player.g;
-
-    if (g && g.flash) {
-      // UI can optionally display this temporary value.
-      // g.flash.battery remains the real battery charge.
-      g.flash.stressVisualBattery =
-        this.visualBatteryOverride;
+    if (g?.flash) {
+      g.flash.stressVisualBattery = this.visualBatteryOverride;
+      g.flash.flk = 0.08;
     }
   }
 
@@ -1314,15 +1007,19 @@ export class StressSystem {
     if (this.visualBatteryTimer <= 0) return;
 
     this.visualBatteryTimer -= dt;
+    const g = this.player.g;
 
-    if (this.visualBatteryTimer <= 0) {
+    if (this.visualBatteryTimer > 0 && this.visualBatteryOverride !== null) {
+      if (g?.flash) g.flash.flk = Math.random() < 0.5 ? 0.05 : 0.35;
+      const pct = Math.round(this.visualBatteryOverride * 100);
+      if (this._barEl) this._barEl.style.width = pct + '%';
+      if (this._pctEl) this._pctEl.textContent = pct + '%';
+    } else {
       this.visualBatteryTimer = 0;
       this.visualBatteryOverride = null;
-
-      const g = this.player.g;
-
-      if (g && g.flash) {
+      if (g?.flash) {
         g.flash.stressVisualBattery = null;
+        g.flash._lastPct = -1;
       }
     }
   }
@@ -1337,14 +1034,13 @@ export class StressSystem {
 
     this.flashlightTime = 0;
     this.standStillTime = 0;
-    this.eventCooldown = 15.0;
+    this.eventCooldown = 12.0;
 
     this.pendingEvents.length = 0;
     this.eventHistory.clear();
 
     this.lastEventType = null;
     this.lastMajorEventTime = -1000;
-
     this.directorTime = 0;
 
     this.anticipation = 0;
@@ -1356,6 +1052,7 @@ export class StressSystem {
     this.monsterThreat = 0;
     this.closeThreatTime = 0;
     this.timeSinceThreat = 999;
+    this.heartbeatTimer = 0;
 
     this.reassuranceTime = 0;
     this.reassuranceActive = false;
@@ -1366,27 +1063,22 @@ export class StressSystem {
 
     this.dlbState = 'inactive';
     this.dlbTimer = 0;
+    this.dlbSurvivalTimer = 0;
     this.dlbOrigin = null;
 
     this.profile = {
       totalTurns: 0,
       fastTurns: 0,
-
       sprintTime: 0,
       windingTime: 0,
       flashlightUse: 0,
-
       repeatedBackChecks: 0,
       stationaryTime: 0,
-
       lastTurnDirection: 0,
       lastTurnTime: -1000,
-
       lastBackCheckTime: -1000,
       lastProfileUpdate: 0,
-
       previousTurnSpeed: 0,
-
       turnHabit: 0,
       sprintHabit: 0,
       flashlightHabit: 0,
@@ -1401,35 +1093,21 @@ export class StressSystem {
     };
 
     const g = this.player.g;
-
-    if (g && g.flash) {
+    if (g?.flash) {
       g.flash.stressVisualBattery = null;
+      g.flash._lastPct = -1;
     }
 
     this.player.stress = 0;
   }
 
   add(amount) {
-    this.value = Math.max(
-      0,
-      Math.min(
-        this.maxStress,
-        this.value + amount
-      )
-    );
-
+    this.value = Math.max(0, Math.min(this.maxStress, this.value + amount));
     this.player.stress = this.value;
   }
 
   remove(amount) {
-    this.value = Math.max(
-      0,
-      Math.min(
-        this.maxStress,
-        this.value - amount
-      )
-    );
-
+    this.value = Math.max(0, Math.min(this.maxStress, this.value - amount));
     this.player.stress = this.value;
   }
 
@@ -1438,6 +1116,6 @@ export class StressSystem {
   }
 
   get panicking() {
-    return this.value >= 95;
+    return this.value >= 90;
   }
 }
