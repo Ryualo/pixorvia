@@ -1994,11 +1994,11 @@ export function createMonsterAI(Base, THREE, CFG) {
     // RENDERING & VISUAL EFFECTS (DOM-Cached & Dirty-Checked)
     // ═════════════════════════════════════════════════════════════════════════
 
-    renderLocal(dt) {
+    renderLocal(dt, remoteLit = false) {
       if (!this.authority()) this.onFlash(true);
       const g = this.g, d = this.dist();
       this.scratch.set(this.pos.x, 1.8, this.pos.z);
-      const lit = !g.dead && g.flash.hits(this.scratch);
+      const lit = remoteLit || (!g.dead && g.flash.hits(this.scratch));
       this.animate(dt, lit, d);
 
       // ── Procedural head-tracking ──
