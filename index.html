@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>Backrooms — Sector 01 // Found Footage</title>
 <style>
 *{box-sizing:border-box}
@@ -50,100 +50,95 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
 
 /* ======================== CAMCORDER & TRANSPARENT OBJECTIVES HUD ======================== */
 #hud{position:fixed;inset:0;z-index:20;pointer-events:none;color:#d4cfaa;text-shadow:0 1px 6px #000}
-#rec{position:absolute;top:17px;left:20px;color:#ff4d4d;font-weight:700;letter-spacing:3px;font-size:14px}
-#rec i{display:inline-block;width:9px;height:9px;border-radius:50%;background:#f33;margin-right:7px;box-shadow:0 0 10px #f00;animation:blink 1s steps(1) infinite}
+#rec{position:absolute;top:14px;left:18px;color:#ff4d4d;font-weight:700;letter-spacing:2.5px;font-size:13px}
+#rec i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#f33;margin-right:6px;box-shadow:0 0 10px #f00;animation:blink 1s steps(1) infinite}
 
-/* Text-only transparent objectives */
+/* Compact transparent objectives */
 #obj-panel{
-  position:absolute;top:42px;left:20px;
+  position:absolute;top:38px;left:18px;
   background:transparent;border:none;padding:0;
-  font-size:11px;line-height:1.65;letter-spacing:.08em;
+  font-size:10.5px;line-height:1.5;letter-spacing:.06em;
   text-shadow:0 1px 4px #000,0 0 8px rgba(0,0,0,.9);
 }
-#obj-phase{color:#fff0a8;font-weight:700;margin-bottom:2px;font-size:10.5px;letter-spacing:.12em;opacity:.9;transition:color .3s}
+#obj-phase{color:#fff0a8;font-weight:700;margin-bottom:1px;font-size:10px;letter-spacing:.1em;opacity:.92;transition:color .3s}
 .obj-item{color:#d4cfaa;opacity:.88}
-.obj-item.done{color:#8cd968;text-decoration:line-through;opacity:.5}
+.obj-item.done{color:#8cd968;text-decoration:line-through;opacity:.45}
 .obj-item.extract{color:#9eff7a;font-weight:700}
 .obj-item.jammed{color:#ff6655;font-weight:700;animation:blink .5s steps(1) infinite}
 #uplink-compass{
-  display:none;margin-top:4px;color:#b8e986;
-  font-weight:700;font-size:11px;letter-spacing:.1em;
+  display:none;margin-top:3px;color:#b8e986;
+  font-weight:700;font-size:10px;letter-spacing:.08em;
 }
 
 /* Discovered Monster Clues HUD (Right side, transparent text) */
 #clue-panel{
-  position:absolute;top:115px;right:20px;text-align:right;
-  font-size:10.5px;line-height:1.6;letter-spacing:.08em;
+  position:absolute;top:52px;right:18px;text-align:right;
+  font-size:10px;line-height:1.45;letter-spacing:.06em;
   text-shadow:0 1px 4px #000,0 0 8px rgba(0,0,0,.95);
-  max-width:290px;
+  max-width:250px;
 }
-#clue-title{color:#ff8877;font-weight:700;font-size:10px;letter-spacing:.14em;margin-bottom:2px;display:none}
-.clue-item{color:#ebd9a0;opacity:.92}
+#clue-title{color:#ff8877;font-weight:700;font-size:9.5px;letter-spacing:.12em;margin-bottom:2px;display:none}
+.clue-item{color:#ebd9a0;opacity:.9}
 .clue-item span{color:#ff6b5b;font-weight:700}
 
 /* Dying Investigator Audio Transcript Subtitle */
 #tape-sub{
-  position:absolute;left:50%;bottom:110px;transform:translateX(-50%);
-  width:min(560px,90vw);padding:10px 16px;
+  position:absolute;left:50%;bottom:88px;transform:translateX(-50%);
+  width:min(500px,84vw);padding:8px 12px;
   background:rgba(14,4,4,.84);border-left:3px solid #ff3b2f;
-  font-size:11px;line-height:1.6;color:#f2e6c2;letter-spacing:.06em;
+  font-size:10px;line-height:1.45;color:#f2e6c2;letter-spacing:.04em;
   text-align:left;opacity:0;transition:opacity .25s;
   text-shadow:0 1px 4px #000;
 }
 #tape-sub.show{opacity:1}
-#tape-sub b{color:#ff6b5b;display:block;font-size:10px;letter-spacing:.14em;margin-bottom:3px}
+#tape-sub b{color:#ff6b5b;display:block;font-size:9.5px;letter-spacing:.1em;margin-bottom:2px}
 
-#top{position:absolute;top:16px;right:20px;text-align:right;font-size:10px;line-height:1.7;opacity:.75}
-#bottom{position:absolute;left:20px;right:20px;bottom:16px;display:flex;justify-content:space-between;font-size:10px}
+#top{position:absolute;top:14px;right:18px;text-align:right;font-size:10px;line-height:1.5;opacity:.75}
+#bottom{position:absolute;left:18px;right:18px;bottom:12px;display:flex;justify-content:space-between;font-size:10px}
 #battery{display:flex;align-items:center;gap:8px}
-#bar{width:82px;height:10px;border:1px solid #aaa;padding:1px;background:#111;position:relative}
+#bar{width:76px;height:9px;border:1px solid #aaa;padding:1px;background:#111;position:relative}
 #bar i{display:block;height:100%;width:100%;background:#cbd68c}
-#crank-msg{color:#ffaa00;font-weight:700;margin-right:8px;display:none;animation:blink .3s steps(1) infinite}
+#crank-msg{color:#ffaa00;font-weight:700;margin-right:6px;display:none;animation:blink .3s steps(1) infinite}
 
 /* ======================== CAMCORDER VIEWFINDER & IDENTIFICATION ======================== */
-#cross{position:absolute;left:50%;top:50%;width:14px;height:14px;transform:translate(-50%,-50%);opacity:.28}
+#cross{position:absolute;left:50%;top:50%;width:12px;height:12px;transform:translate(-50%,-50%);opacity:.28}
 #cross:before,#cross:after{content:"";position:absolute;background:#ddd}
-#cross:before{left:6px;top:1px;width:1px;height:12px}
-#cross:after{left:1px;top:6px;width:12px;height:1px}
+#cross:before{left:5px;top:1px;width:1px;height:10px}
+#cross:after{left:1px;top:5px;width:10px;height:1px}
 
 #vf-frame{
-  position:absolute;left:50%;top:50%;width:154px;height:108px;
+  position:absolute;left:50%;top:50%;width:136px;height:94px;
   transform:translate(-50%,-50%);opacity:.2;transition:all .14s ease-out;
 }
-#vf-frame i{position:absolute;width:14px;height:14px;border-color:#e7d994;border-style:solid;transition:border-color .14s,box-shadow .14s}
+#vf-frame i{position:absolute;width:12px;height:12px;border-color:#e7d994;border-style:solid;transition:border-color .14s,box-shadow .14s}
 #vf-frame .tl{top:0;left:0;border-width:2px 0 0 2px}
 #vf-frame .tr{top:0;right:0;border-width:2px 2px 0 0}
 #vf-frame .bl{bottom:0;left:0;border-width:0 0 2px 2px}
 #vf-frame .br{bottom:0;right:0;border-width:0 2px 2px 0}
 #vf-label{
-  position:absolute;left:50%;top:calc(50% + 62px);transform:translateX(-50%);
-  font-size:10px;letter-spacing:1.5px;color:#ff5544;font-weight:700;
-  opacity:0;transition:opacity .12s;white-space:nowrap;
-  text-shadow:0 1px 4px #000,0 0 8px #000;
+  position:absolute;left:50%;top:calc(50% + 54px);transform:translateX(-50%);
+  font-size:9.5px;letter-spacing:1.1px;color:#ff5544;font-weight:700;
+  opacity:0;transition:opacity .12s;
+  max-width:62vw;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  padding:3px 8px;border-radius:3px;background:rgba(0,0,0,.55);
+  text-shadow:0 1px 4px #000;
 }
-#vf-frame.locked{opacity:.95;width:126px;height:86px}
+#vf-frame.locked{opacity:.95;width:118px;height:80px}
 #vf-frame.locked i{border-color:#ff4433;box-shadow:0 0 8px rgba(255,50,30,.55)}
 #vf-frame.locked + #vf-label{opacity:1;color:#ff5544}
 
-#vf-frame.interact{opacity:.95;width:132px;height:90px}
+#vf-frame.interact{opacity:.95;width:122px;height:84px}
 #vf-frame.interact i{border-color:#9eff7a;box-shadow:0 0 10px rgba(140,255,100,.55)}
 #vf-frame.interact + #vf-label{opacity:1;color:#b8ff9e}
 
-#msg{position:absolute;left:50%;bottom:70px;transform:translateX(-50%);padding:6px 12px;background:rgba(0,0,0,.55);border:1px solid rgba(220,210,160,.22);opacity:0;transition:opacity .15s;text-align:center}
+#msg{position:absolute;left:50%;bottom:48px;transform:translateX(-50%);padding:5px 10px;font-size:10px;background:rgba(0,0,0,.6);border:1px solid rgba(220,210,160,.22);opacity:0;transition:opacity .15s;text-align:center;max-width:75vw}
 #msg.show{opacity:1}
-#warning{position:absolute;top:52px;left:50%;transform:translateX(-50%);color:#d7c98e;font-size:10px;letter-spacing:2px;opacity:0;transition:opacity .2s}
-#warning.show{opacity:.85}
+#warning{position:absolute;top:40px;left:50%;transform:translateX(-50%);color:#d7c98e;font-size:10px;letter-spacing:1.5px;opacity:0;transition:opacity .2s;text-align:center;max-width:72vw}
+#warning.show{opacity:.9}
 #danger{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 42%,rgba(0,0,0,.42) 100%);opacity:0;transition:opacity .3s}
 #flash{position:fixed;inset:0;z-index:30;pointer-events:none;background:#fff;opacity:0}
 #dark{position:fixed;inset:0;z-index:19;pointer-events:none;background:#000;opacity:0;transition:opacity 1.1s}
 #jumpscare{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:0;background:#000}
-#jumpscare .face{position:absolute;left:50%;top:50%;width:min(44vw,520px);height:min(68vh,700px);transform:translate(-50%,-50%);filter:contrast(1.4) brightness(.75) blur(1px)}
-#jumpscare .head{position:absolute;left:50%;top:18%;width:58%;height:52%;transform:translateX(-50%);border-radius:46% 52% 40% 48%;background:radial-gradient(circle at 50% 38%,#1a1a1a,#030303 62%,transparent 72%);box-shadow:0 0 90px 40px #000}
-#jumpscare .eye{position:absolute;top:40%;width:9%;height:4%;border-radius:50%;background:#ff210e;box-shadow:0 0 30px 6px #f00}
-#jumpscare .e1{left:30%}.e2{right:30%}
-#jumpscare .mouth{position:absolute;left:50%;top:56%;width:30%;height:20%;transform:translateX(-50%);background:#000;border-radius:45% 45% 50% 50%;box-shadow:inset 0 -20px 0 #120808}
-#jumpscare.active{animation:jumpscare .9s steps(4) forwards}
-@keyframes jumpscare{0%{opacity:0;transform:scale(1)}8%{opacity:1;transform:scale(1.15)}18%{opacity:.8;transform:scale(.98)}30%{opacity:1;transform:scale(1.2)}45%{opacity:.75;transform:scale(1)}60%{opacity:1;transform:scale(1.08)}100%{opacity:0;transform:scale(1.02)}}
 #vhs{position:fixed;inset:0;z-index:15;pointer-events:none}
 #vhs .scan{position:absolute;inset:0;opacity:.8;background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,rgba(0,0,0,.2) 3px,rgba(0,0,0,.2) 4px)}
 #vhs .vig{position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 34%,rgba(0,0,0,.18) 62%,rgba(0,0,0,.62) 100%);pointer-events:none}
@@ -153,40 +148,102 @@ body:has(#lobby:not(.hidden)) #start{opacity:0;pointer-events:none}
 @keyframes shift{50%{transform:translateX(6px) skewX(2deg);filter:hue-rotate(20deg) saturate(1.6)}}
 @keyframes grain{0%{transform:translate(0,0)}33%{transform:translate(-3%,2%)}66%{transform:translate(2%,-3%)}100%{transform:translate(-2%,-1%)}}
 @keyframes blink{50%{opacity:.15}}
-#mp-hud{position:fixed;top:60px;right:20px;z-index:21;display:none;pointer-events:none;color:#d4cfaa;font-size:10px;line-height:1.7;text-align:right;white-space:pre;text-shadow:0 1px 6px #000;opacity:.8}
-
-/* --- MOBILE UI STYLES --- */
-#mobile-ui { display: none; }
-@media (pointer: coarse) {
-  #mobile-ui { display: block; position: fixed; inset: 0; z-index: 999; pointer-events: none; }
-  #fullscreen-btn { position: absolute; top: 15px; left: 15px; pointer-events: auto; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #aaa; padding: 10px; border-radius: 5px; font-family: monospace; }
-  #btn-restart { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); pointer-events: auto; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #aaa; padding: 10px; border-radius: 5px; font-family: monospace; }
-  #joystick-zone { position: absolute; bottom: 30px; left: 20px; width: 140px; height: 140px; pointer-events: auto; touch-action: none; }
-  #action-right { position: absolute; bottom: 30px; right: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; pointer-events: auto; }
-  #mobile-ui button { width: 55px; height: 55px; background: rgba(255,255,255,0.15); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; font-size: 12px; backdrop-filter: blur(4px); user-select: none; -webkit-user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent; }
-  #obj-panel { top: 108px; left: 15px; font-size: 9.5px; }
-  #clue-panel { top: 108px; right: 15px; font-size: 9px; max-width: 180px; }
-}
+#mp-hud{position:fixed;top:48px;right:18px;z-index:21;display:none;pointer-events:none;color:#d4cfaa;font-size:9.5px;line-height:1.5;text-align:right;white-space:pre;text-shadow:0 1px 6px #000;opacity:.8}
 
 #performance-btn{
-  position:fixed;right:16px;bottom:58px;z-index:1002;
-  pointer-events:auto;padding:9px 12px;
-  color:#e7d994;background:rgba(0,0,0,.78);
-  border:1px solid rgba(235,220,150,.4);border-radius:4px;
-  font:11px ui-monospace,SFMono-Regular,Menlo,monospace;
-  letter-spacing:.08em;cursor:pointer;touch-action:manipulation;
+  position:fixed;right:16px;bottom:42px;z-index:1002;
+  pointer-events:auto;padding:6px 10px;
+  color:#e7d994;background:rgba(0,0,0,.72);
+  border:1px solid rgba(235,220,150,.35);border-radius:4px;
+  font:9.5px ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.06em;cursor:pointer;touch-action:manipulation;
 }
 #performance-btn[aria-pressed="true"]{
   color:#d9f59a;border-color:rgba(190,230,130,.7);
-  box-shadow:0 0 12px rgba(150,200,80,.12);
 }
 body.performance-mode #vhs .grain{animation:none;opacity:.025}
 body.performance-mode #vhs .scan{opacity:.38}
 body.performance-mode #vhs .track{display:none}
 
-@media (pointer:coarse){
-  #performance-btn{right:auto;left:15px;top:62px;bottom:auto;padding:8px 10px;font-size:10px}
-  body.performance-mode #mobile-ui button{backdrop-filter:none}
+/* ======================== CLEAN MOBILE UI STYLES ======================== */
+#mobile-ui { display: none; }
+@media (pointer: coarse) {
+  #mobile-ui { display: block; position: fixed; inset: 0; z-index: 999; pointer-events: none; }
+
+  /* Top-center compact utility pills — NEVER overlap REC on the top-left! */
+  #mobile-top-bar {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; pointer-events: auto;
+  }
+  #mobile-top-bar button {
+    width: auto !important; height: 26px !important;
+    padding: 0 10px !important; border-radius: 4px !important;
+    background: rgba(0,0,0,0.65) !important; color: #e7d994 !important;
+    border: 1px solid rgba(235,220,150,0.35) !important;
+    font: 9.5px ui-monospace,monospace !important; letter-spacing: .06em;
+  }
+
+  /* Move Performance button into the top utility bar area on mobile */
+  #performance-btn {
+    right: auto; left: 50%; top: 40px; bottom: auto;
+    transform: translateX(-50%);
+    padding: 3px 8px; font-size: 8.5px; opacity: 0.7;
+  }
+
+  /* Left-side Objectives sits cleanly right under REC (top: 34px) */
+  #obj-panel { top: 34px; left: 14px; font-size: 9px; line-height: 1.38; max-width: 46vw; }
+  #obj-phase { font-size: 8.5px; }
+  #uplink-compass { font-size: 9px; margin-top: 2px; }
+  #clue-panel { top: 46px; right: 14px; font-size: 8.5px; max-width: 38vw; line-height: 1.35; }
+
+  /* Compact Viewfinder on Mobile */
+  #vf-frame { width: 108px; height: 74px; }
+  #vf-frame.interact, #vf-frame.locked { width: 96px; height: 66px; }
+  #vf-label { top: calc(50% + 40px); font-size: 8.5px; max-width: 52vw; padding: 2px 6px; }
+
+  /* Left Thumb Joystick */
+  #joystick-zone {
+    position: absolute; bottom: 26px; left: 16px;
+    width: 120px; height: 120px; pointer-events: auto; touch-action: none;
+  }
+
+  /* Right Thumb Action Cluster */
+  #action-right {
+    position: absolute; bottom: 28px; right: 16px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 7px; pointer-events: auto;
+  }
+  #action-right button {
+    width: 48px; height: 48px;
+    background: rgba(20, 18, 12, 0.55); color: #e7d994;
+    border: 1px solid rgba(235, 220, 150, 0.35); border-radius: 50%;
+    font: 700 10px ui-monospace, monospace; letter-spacing: .04em;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #action-right button:active {
+    background: rgba(235, 220, 150, 0.28); border-color: #fff2b2;
+  }
+
+  /* Contextual Floating "HOLD [SPACE]" Button for Tapes, Relays, Junctions & Uplink! */
+  #btn-hold {
+    position: absolute; bottom: 138px; right: 16px;
+    width: 103px !important; height: 40px !important;
+    border-radius: 6px !important;
+    background: rgba(25, 65, 20, 0.85) !important;
+    border: 1.5px solid #9eff7a !important;
+    color: #d9ffca !important;
+    font: 700 10.5px ui-monospace, monospace !important;
+    letter-spacing: 0.08em;
+    box-shadow: 0 0 12px rgba(120, 255, 90, 0.35);
+    display: none; pointer-events: auto; touch-action: none;
+    user-select: none; -webkit-user-select: none;
+  }
+  #btn-hold.show { display: block; }
+  #btn-hold.holding {
+    background: rgba(90, 210, 60, 0.92) !important;
+    color: #051202 !important;
+    transform: scale(0.96);
+  }
 }
 </style>
 
@@ -204,13 +261,13 @@ body.performance-mode #vhs .track{display:none}
 </head>
 <body>
 
-<!-- MINIMAL PAUSE OVERLAY (WHEN PRESSING ESC) -->
+<!-- MINIMAL PAUSE OVERLAY (ESC) -->
 <div id="start">
   <div>
     <b>PAUSED</b>
     <small>
       CLICK TO RESUME<br>
-      WASD MOVE &nbsp;·&nbsp; SHIFT RUN &nbsp;·&nbsp; F FLASHLIGHT &nbsp;·&nbsp; E WIND &nbsp;·&nbsp; CLICK/C PHOTO OR INTERACT &nbsp;·&nbsp; SPACE UPLOAD<br>
+      WASD MOVE &nbsp;·&nbsp; SHIFT RUN &nbsp;·&nbsp; F FLASHLIGHT &nbsp;·&nbsp; E WIND &nbsp;·&nbsp; CLICK/C PHOTO &nbsp;·&nbsp; HOLD SPACE INTERACT
     </small>
   </div>
 </div>
@@ -220,13 +277,13 @@ body.performance-mode #vhs .track{display:none}
   <div id="rec"><i></i>REC <span id="clock">00:00:00</span></div>
 
   <div id="obj-panel">
-    <div id="obj-phase">PHASE 1/5 // RECONNAISSANCE</div>
+    <div id="obj-phase">PHASE 1/5 // RECON</div>
     <div id="obj-list"></div>
     <div id="uplink-compass"></div>
   </div>
 
   <div id="clue-panel">
-    <div id="clue-title">ENTITY PROFILE // CLUES</div>
+    <div id="clue-title">ENTITY TRAITS</div>
     <div id="clue-list"></div>
   </div>
 
@@ -234,7 +291,7 @@ body.performance-mode #vhs .track{display:none}
   <div id="warning">SIGNAL DISTORTION</div>
   <div id="cross"></div>
   <div id="vf-frame"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i></div>
-  <div id="vf-label">SUBJECT IN FRAME — [C / CLICK] TO CAPTURE</div>
+  <div id="vf-label">SUBJECT IN FRAME</div>
   <div id="tape-sub"></div>
   <div id="msg"></div>
   <div id="danger"></div>
@@ -244,7 +301,7 @@ body.performance-mode #vhs .track{display:none}
   </div>
 </div>
 
-<div id="jumpscare"><div class="face"><div class="head"></div><div class="eye e1"></div><div class="eye e2"></div><div class="mouth"></div></div></div>
+<div id="jumpscare"></div>
 
 <!-- TRANSPARENT HOME SCREEN SHOWING THE 3D BACKROOMS BEHIND IT -->
 <div id="lobby">
@@ -271,17 +328,21 @@ body.performance-mode #vhs .track{display:none}
 </div>
 
 <div id="mp-hud"></div>
-<button id="performance-btn" type="button" aria-pressed="false" title="Reduce graphics for smoother performance">PERFORMANCE: OFF</button>
+<button id="performance-btn" type="button" aria-pressed="false" title="Reduce graphics for smoother performance">PERF: OFF</button>
 <div id="flash"></div><div id="dark"></div>
 <div id="vhs"><div class="scan"></div><div class="vig"></div><div class="grain"></div><div class="track" id="track"></div></div>
 
 <div id="mobile-ui">
-  <button id="fullscreen-btn">⛶ FULLSCREEN</button>
-  <button id="btn-restart">⟳ SECTOR</button>
+  <div id="mobile-top-bar">
+    <button id="fullscreen-btn">⛶ FULL</button>
+    <button id="btn-restart">⟳ SECTOR</button>
+  </div>
   <div id="joystick-zone"></div>
+  <!-- Dedicated Contextual Hold Button for Tapes, Relays, Breaker Boxes & Uplink -->
+  <button id="btn-hold" type="button">● HOLD</button>
   <div id="action-right">
     <button id="btn-c">CAM</button>
-    <button id="btn-f">FLASH</button>
+    <button id="btn-f">LIGHT</button>
     <button id="btn-e">WIND</button>
     <button id="btn-shift">RUN</button>
   </div>
