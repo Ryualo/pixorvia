@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import {RemotePlayer} from './remote-player.js';
-import {NetworkWorld} from './network-world.js';
+import { RemotePlayer } from './remote-player.js';
+import { NetworkWorld } from './network-world.js';
 
 const MAX = 4, SEND = 1 / 20, WIPE_DELAY = 2.5, TIMEOUT = 10000, ID_RETRIES = 5;
 const PEER_SRC = ['https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js', 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'];
@@ -14,97 +14,48 @@ const ERR = {
 const errText = e => 'CONNECTION FAILED: ' + (ERR[e?.type] || String(e?.type || 'UNKNOWN').toUpperCase()) + (e?.message ? ` (${e.message})` : '');
 const $ = id => document.getElementById(id);
 
-// make sure the PeerJS global exists before any multiplayer code touches it
 let peerLoad = null;
 const loadPeer = () => window.Peer ? Promise.resolve(window.Peer) : (peerLoad ||= new Promise((res, rej) => {
   const next = i => {
-    if (i >= PEER_SRC.length) { peerLoad = null; return rej(new Error('PEERJS FAILED TO LOAD')) }
+    if (i >= PEER_SRC.length) { peerLoad = null; return rej(new Error('PEERJS FAILED TO LOAD')); }
     const s = document.createElement('script'); s.src = PEER_SRC[i];
     s.onload = () => window.Peer ? res(window.Peer) : next(i + 1);
-    s.onerror = () => { s.remove(); next(i + 1) };
+    s.onerror = () => { s.remove(); next(i + 1); };
     document.head.appendChild(s);
   };
   next(0);
 }));
-/* ======================================================================
-   ICE CONFIGURATION  —  the ONLY thing needed for cross-network play
-   ----------------------------------------------------------------------
-   Same-WiFi works with STUN alone (hosts are on the LAN, so the direct
-   candidate pair succeeds).  Across different networks both peers sit
-   behind carrier-grade NAT / symmetric NAT, which never yields a usable
-   host candidate pair — ICE needs a relay (TURN) or the connection just
-   hangs until the timeout.  Everything below is plain WebRTC config, so
-   it works unchanged on GitHub Pages (static + HTTPS).
 
-   Add your TURN credentials to TURN_SERVERS.  Any of these providers
-   works (they speak standard TURN over the given ports):
-     - Metered / Open Relay  (free tier, dashboard gives url+user+cred)
-     - Twilio Network Traversal Service
-     - Cloudflare Calls / coturn self-hosted
-   Leave the array empty to stay STUN-only (i.e. keep the current
-   LAN-only behaviour) — nothing else in the file needs to change.
-   ====================================================================== */
 const STUN_SERVERS = [
-  {urls: 'stun:stun.l.google.com:19302'},
-  {urls: 'stun:stun1.l.google.com:19302'},
-  {urls: 'stun:stun.cloudflare.com:3478'},
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
 ];
-
-// >>> INSERT YOUR TURN CREDENTIALS HERE <<<
-// TURN needs BOTH tcp:443 and udp:3478 — tcp:443/turns:443 is what gets
-// through restrictive corporate / school / mobile firewalls.
 const TURN_SERVERS = [
-  // {urls: 'turn:YOUR_TURN_HOST:3478',  username: 'YOUR_USERNAME', credential: 'YOUR_CREDENTIAL'},
-  // {urls: 'turn:YOUR_TURN_HOST:3478?transport=tcp', username: 'YOUR_USERNAME', credential: 'YOUR_CREDENTIAL'},
-  // {urls: 'turns:YOUR_TURN_HOST:443?transport=tcp', username: 'YOUR_USERNAME', credential: 'YOUR_CREDENTIAL'},
-  // --- Free public relay (no account, best-effort, rate limited).
-  //     Uncomment for an instant cross-network test, then replace with
-  //     your own credentials before shipping.
-  // {urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject'},
-  // {urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject'},
+  // { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+  // { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
 ];
 
-// ICE policy: with a TURN server available, "all" lets ICE use the relay
-// only when the direct path fails (best latency when it can, reliable when
-// it cannot).  Force "relay" while debugging a stubborn network.
 const ICE_TRANSPORT_POLICY = 'all';
-const ICE_DEBUG = true; // verbose ICE state logging to the console
-
+const ICE_DEBUG = true;
 const iceServers = [...STUN_SERVERS, ...TURN_SERVERS];
 const hasTurn = TURN_SERVERS.length > 0;
+const peerOptions = () => ({ debug: ICE_DEBUG ? 2 : 0, config: { iceServers, iceTransportPolicy: ICE_TRANSPORT_POLICY } });
+const turnWarning = () => hasTurn ? null : 'NO TURN SERVER CONFIGURED — SAME WI-FI ONLY UNLESS TURN IS ADDED';
 
-// one shared options object shape for both the host and the joiner,
-// so ICE config can never drift between the two roles.
-const peerOptions = () => ({
-  debug: ICE_DEBUG ? 2 : 0,
-  config: {iceServers, iceTransportPolicy: ICE_TRANSPORT_POLICY},
-});
-
-// true when this peer has no reachable relay, i.e. cross-network can't work
-const turnWarning = () => hasTurn ? null
-  : 'NO TURN SERVER CONFIGURED — SEARCHING FOR A DIRECT CONNECTION (MIGHT WORK ON THE SAME WI-FI ONLY)';
-
-// PeerJS hands us the underlying RTCPeerConnection on 'iceStateChanged' via
-// the internal event, and exposes the state on the connection object.  These
-// helpers turn ICE's cryptic states into something readable in the log.
 const ICE_STATE = {
-  'new': 'STARTING', checking: 'CHECKING CANDIDATES (STUN/TURN)...',
+  new: 'STARTING', checking: 'CHECKING CANDIDATES (STUN/TURN)...',
   connected: 'DIRECT PATH FOUND', completed: 'PATH ESTABLISHED',
-  disconnected: 'PATH LOST — RETRYING', failed: 'NO PATH — LIKELY BLOCKED BY NAT/FIREWALL',
-  closed: 'CLOSED',
+  disconnected: 'PATH LOST — RETRYING', failed: 'NO PATH — LIKELY BLOCKED BY NAT/FIREWALL', closed: 'CLOSED',
 };
 const iceLog = (who, state) => {
-  if (!ICE_DEBUG) return;
-  console.log(`[ICE] ${who}: ${ICE_STATE[state] || state}`);
-  if (state === 'failed') console.warn(hasTurn
-    ? '[ICE] Relay failed too — verify your TURN url / username / credential are correct and the TURN server is reachable.'
-    : '[ICE] No TURN server is configured (see TURN_SERVERS in multiplayer.js). Cross-network play requires TURN.');
+  if (ICE_DEBUG) console.log(`[ICE] ${who}: ${ICE_STATE[state] || state}`);
 };
 
 const E = new THREE.Euler(0, 0, 0, 'YXZ');
 const clean = s => String(s || '').replace(/[^\w \-.]/g, '').trim().slice(0, 14) || 'WANDERER';
 const newSeed = () => (Math.random() * 2 ** 32) >>> 0;
-const code = () => Array.from({length: 5}, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.random() * 32 | 0]).join('');
+const code = () => Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.random() * 32 | 0]).join('');
 const finite = d => [d.x, d.y, d.z, d.yaw, d.pitch].every(Number.isFinite);
 
 export class Multiplayer {
@@ -113,25 +64,21 @@ export class Multiplayer {
     this.conns = new Map(); this.remotes = new Map();
     this.name = ''; this.room = ''; this.alive = true; this.spectating = false; this.follow = null;
     this.sendT = 0; this.wipeT = 0; this.seed = null;
-    this.sess = 0; this.timer = 0; // sess invalidates callbacks from torn-down peers
-    this.share = new NetworkWorld(g); // ONE authoritative monster/world state per session
+    this.sess = 0; this.timer = 0;
+    this.share = new NetworkWorld(g);
     this.ui();
     addEventListener('beforeunload', () => this.peer?.destroy());
   }
 
-  // ---------- lobby UI ----------
   ui() {
     const lobby = $('lobby');
-    // keep lobby typing away from the game's key handlers (e.g. R = regenerate)
     for (const ev of ['keydown', 'keyup']) lobby.addEventListener(ev, e => e.stopPropagation());
     $('lb-solo').onclick = () => lobby.classList.add('hidden');
-    $('lb-coop').onclick = () => { $('lb-modes').style.display = 'none'; $('lb-panel').style.display = 'block'; $('lb-name').focus() };
-    $('lb-host').onclick = () => this.hostGame();
-    $('lb-join').onclick = () => this.joinGame($('lb-room').value);
-    $('lb-enter').onclick = () => lobby.classList.add('hidden');
-    addEventListener('mousedown', () => { if (this.spectating) this.nextTarget() });
+    $('lb-coop').onclick = () => {$('lb-modes').style.display = 'none'; $('lb-panel').style.display = 'block';$('lb-name').focus(); };
+    $('lb-host').onclick = () => this.hostGame();$('lb-join').onclick = () => this.joinGame($('lb-room').value);$('lb-enter').onclick = () => lobby.classList.add('hidden');
+    addEventListener('mousedown', () => { if (this.spectating) this.nextTarget(); });
   }
-  status(t) { $('lb-status').textContent = t }
+  status(t) { $('lb-status').textContent = t; }
   roster() {
     const list = [`${this.name}${this.alive ? '' : ' (LOST)'} (YOU)`];
     for (const r of this.remotes.values()) list.push(r.name + (r.alive ? '' : ' (LOST)'));
@@ -140,23 +87,17 @@ export class Multiplayer {
     h.style.display = this.coop ? 'block' : 'none';
     h.textContent = `ROOM ${this.room} · ${list.length}/${MAX}` + (this.spectating ? `\nSPECTATING: ${this.follow ? this.follow.name : 'NO SIGNAL'}${this.remotes.size > 1 ? ' — CLICK TO SWITCH' : ''}` : '');
   }
-  lockButtons(on) { for (const id of ['lb-host', 'lb-join']) $(id).disabled = on }
+  lockButtons(on) { for (const id of ['lb-host', 'lb-join']) $(id).disabled = on; }
 
-  // ---------- connection setup (star topology: host relays) ----------
   arm() {
     this.disarm();
     this.lastIce = 'new';
     this.timer = setTimeout(() => {
-      const st = this.lastIce || 'unknown';
-      const reason = ICE_STATE[st] || st;
-      const hint = st === 'failed'
-        ? (hasTurn ? ' — CHECK TURN CREDENTIALS / SERVER REACHABILITY' : ' — CONFIGURE A TURN SERVER IN MULTIPLAYER.JS')
-        : st === 'checking' ? ' — CANDIDATES NEVER RESOLVED (DNS/FIREWALL/STUN BLOCKED)' : '';
-      this.fail(`CONNECTION FAILED (${reason.toUpperCase()}${hint})`);
+      const st = this.lastIce || 'unknown', reason = ICE_STATE[st] || st;
+      this.fail(`CONNECTION FAILED (${reason.toUpperCase()})`);
     }, TIMEOUT);
   }
-  disarm() { clearTimeout(this.timer); this.timer = 0 }
-  // abort a pending (or live) connection and show why
+  disarm() { clearTimeout(this.timer); this.timer = 0; }
   fail(msg) {
     this.disarm();
     if (this.coop) return this.endCoop(msg);
@@ -167,104 +108,93 @@ export class Multiplayer {
 
   async hostGame(tries = 0) {
     this.name = clean($('lb-name').value); this.lockButtons(true); this.status('LOADING PEERJS...');
-    try { await loadPeer() } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET') }
+    try { await loadPeer(); } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET'); }
     const s = ++this.sess, room = code();
     this.status('CREATING ROOM...');
-    const peer = this.peer = new Peer(room, peerOptions()); // room ID == real PeerJS ID
-    if (ICE_DEBUG) console.log('[MP] HOST: starting with ICE config', JSON.stringify(iceServers));
-    const w = turnWarning(); if (w) { console.warn('[MP]', w); this.status(w) }
-    this.lastIce = 'new';
+    const peer = this.peer = new Peer(room, peerOptions());
+    const w = turnWarning(); if (w) this.status(w);
     this.arm();
     peer.on('open', id => {
       if (s !== this.sess) return;
       this.disarm(); this.room = id;
       this.coop = true; this.isHost = true; this.alive = true;
-      this.share.attach(); this.share.host = true; // host runs the only monster AI
+      this.share.attach(); this.share.host = true;
       this.seed = newSeed(); this.g.level = -1; this.g.newLevel(this.seed);
       this.status(`ROOM ID: ${id} — SHARE IT WITH UP TO ${MAX - 1} FRIENDS`);
       $('lb-enter').style.display = 'inline-block'; this.roster();
     });
     peer.on('connection', conn => {
-      if (ICE_DEBUG) {
-        conn.on('iceStateChanged', st => { this.lastIce = st; iceLog(`HOST↔${conn.peer}`, st) });
-        try { conn.peerConnection?.addEventListener?.('icecandidateerror', e =>
-          console.warn(`[ICE] HOST↔${conn.peer} candidate error`, e?.errorCode, e?.errorText || e)) } catch {}
-      }
+      if (ICE_DEBUG) conn.on('iceStateChanged', st => { this.lastIce = st; iceLog(`HOST↔${conn.peer}`, st); });
       this.acceptClient(conn, s);
     });
     peer.on('disconnected', () => {
       if (s !== this.sess || peer.destroyed) return;
-      if (!this.coop) return this.fail(errText({type: 'disconnected'}));
-      // existing players stay connected P2P; reconnect so new players can still join
+      if (!this.coop) return this.fail(errText({ type: 'disconnected' }));
       this.status(`ROOM ID: ${this.room} — SIGNALING LOST, RECONNECTING...`); peer.reconnect();
     });
-    peer.on('close', () => { if (s === this.sess) this.fail('ROOM CLOSED') });
+    peer.on('close', () => { if (s === this.sess) this.fail('ROOM CLOSED'); });
     peer.on('error', e => {
       if (s !== this.sess) return;
       if (e.type === 'unavailable-id' && tries < ID_RETRIES) {
         this.sess++; this.disarm(); peer.destroy(); this.peer = null;
         return this.hostGame(tries + 1);
       }
-      if (this.coop) { this.status(errText(e)); return } // room stays up for connected players
+      if (this.coop) { this.status(errText(e)); return; }
       this.fail(errText(e));
     });
   }
+
   acceptClient(conn, s) {
     conn.on('open', () => {
       if (s !== this.sess) return conn.close();
-      if (this.conns.size >= MAX - 1) { conn.send({t: 'full'}); setTimeout(() => conn.close(), 300); return }
+      if (this.conns.size >= MAX - 1) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 300); return; }
       this.conns.set(conn.peer, conn);
     });
-    conn.on('data', d => { if (s === this.sess) this.receive(d, conn) });
-    conn.on('close', () => { if (s === this.sess) this.dropClient(conn.peer) });
-    conn.on('error', () => { if (s === this.sess) this.dropClient(conn.peer) });
+    conn.on('data', d => { if (s === this.sess) this.receive(d, conn); });
+    conn.on('close', () => { if (s === this.sess) this.dropClient(conn.peer); });
+    conn.on('error', () => { if (s === this.sess) this.dropClient(conn.peer); });
   }
 
   async joinGame(raw) {
     const room = String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (room.length < 5 || room.length > 6) return this.status('ENTER THE 5–6 CHARACTER ROOM ID');
     this.name = clean($('lb-name').value); this.room = room; this.lockButtons(true); this.status('LOADING PEERJS...');
-    try { await loadPeer() } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET') }
+    try { await loadPeer(); } catch { return this.fail('PEERJS FAILED TO LOAD — CHECK YOUR INTERNET'); }
     const s = ++this.sess;
     this.status('CONNECTING TO SIGNALING SERVER...');
     const peer = this.peer = new Peer(peerOptions());
-    if (ICE_DEBUG) console.log('[MP] CLIENT: connecting with ICE config', JSON.stringify(iceServers));
-    const w = turnWarning(); if (w) { console.warn('[MP]', w); this.status(w) }
-    this.lastIce = 'new';
-    this.arm(); // cleared only when the host's welcome arrives
+    const w = turnWarning(); if (w) this.status(w);
+    this.arm();
     peer.on('open', () => {
       if (s !== this.sess) return;
       this.status(`CONNECTING TO ROOM ${room}...`);
-      const conn = this.hostConn = peer.connect(room, {reliable: true}); // exact PeerJS ID
-      if (ICE_DEBUG) {
-        conn.on('iceStateChanged', st => { this.lastIce = st; iceLog(`CLIENT↔${room}`, st) });
-        try { conn.peerConnection?.addEventListener?.('icecandidateerror', e =>
-          console.warn(`[ICE] CLIENT↔${room} candidate error`, e?.errorCode, e?.errorText || e)) } catch {}
-      }
+      const conn = this.hostConn = peer.connect(room, { reliable: true });
+      if (ICE_DEBUG) conn.on('iceStateChanged', st => { this.lastIce = st; iceLog(`CLIENT↔${room}`, st); });
       conn.on('open', () => {
         if (s !== this.sess) return;
         this.status(`CONNECTED — SYNCING WITH ROOM ${room}...`);
-        conn.send({t: 'hello', name: this.name});
+        conn.send({ t: 'hello', name: this.name });
       });
-      conn.on('data', d => { if (s === this.sess) this.receive(d, conn) });
-      conn.on('close', () => { if (s === this.sess) this.fail(this.coop ? 'HOST DISCONNECTED' : 'CONNECTION FAILED: HOST CLOSED THE CONNECTION') });
-      conn.on('error', e => { if (s === this.sess) this.fail(errText(e)) });
+      conn.on('data', d => { if (s === this.sess) this.receive(d, conn); });
+      conn.on('close', () => { if (s === this.sess) this.fail(this.coop ? 'HOST DISCONNECTED' : 'HOST CLOSED THE CONNECTION'); });
+      conn.on('error', e => { if (s === this.sess) this.fail(errText(e)); });
     });
     peer.on('disconnected', () => {
       if (s !== this.sess || peer.destroyed) return;
-      if (this.hostConn?.open) peer.reconnect(); // P2P link is still alive
-      else this.fail(errText({type: 'disconnected'}));
+      if (this.hostConn?.open) peer.reconnect();
+      else this.fail(errText({ type: 'disconnected' }));
     });
-    peer.on('close', () => { if (s === this.sess) this.fail('CONNECTION CLOSED') });
+    peer.on('close', () => { if (s === this.sess) this.fail('CONNECTION CLOSED'); });
     peer.on('error', e => {
       if (s !== this.sess) return;
-      if (this.coop && this.hostConn?.open) { this.g.say(errText(e), 2500); return } // signaling hiccup only
+      if (this.coop && this.hostConn?.open) { this.g.say(errText(e), 2500); return; }
       this.fail(errText(e));
     });
   }
+
   dropClient(id) {
     if (!this.conns.has(id)) return;
-    this.conns.delete(id); this.removeRemote(id); this.broadcast({t: 'leave', id});
+    this.conns.delete(id); this.removeRemote(id); this.broadcast({ t: 'leave', id });
   }
   endCoop(msg) {
     if (!this.coop) return;
@@ -274,18 +204,16 @@ export class Multiplayer {
     this.share.detach();
     for (const id of [...this.remotes.keys()]) this.removeRemote(id);
     this.conns.clear(); this.hostConn = null; this.peer?.destroy(); this.peer = null;
-    this.lockButtons(false); this.status(msg); $('mp-hud').style.display = 'none';
-    $('lb-enter').style.display = 'none';
+    this.lockButtons(false); this.status(msg); $('mp-hud').style.display = 'none';$('lb-enter').style.display = 'none';
     if (wasDead) this.g.respawn();
     this.g.say(msg, 2500);
   }
 
-  // ---------- messaging ----------
-  broadcast(msg, except) { for (const c of this.conns.values()) if (c !== except && c.open) c.send(msg) }
-  emit(msg) { if (this.isHost) this.broadcast(msg); else if (this.hostConn?.open) this.hostConn.send(msg) }
+  broadcast(msg, except) { for (const c of this.conns.values()) if (c !== except && c.open) c.send(msg); }
+  emit(msg) { if (this.isHost) this.broadcast(msg); else if (this.hostConn?.open) this.hostConn.send(msg); }
   addRemote(id, name, alive = true) {
     if (this.remotes.has(id) || id === this.peer?.id || this.remotes.size >= MAX - 1) return;
-    const r = new RemotePlayer(this.g.scene, id, clean(name)); r.alive = alive;
+    const r = new RemotePlayer(this.g.scene, id, clean(name)); r.alive = alive; r.flashOn = true;
     this.remotes.set(id, r); this.roster();
   }
   removeRemote(id) {
@@ -294,35 +222,50 @@ export class Multiplayer {
     if (this.follow === r) this.follow = null;
     this.roster();
   }
-  setAlive(id, alive) { const r = this.remotes.get(id); if (r) { r.alive = alive; this.roster() } }
+  setAlive(id, alive) { const r = this.remotes.get(id); if (r) { r.alive = alive; this.roster(); } }
+
+  _applyRemoteState(r, d) {
+    if (!r) return;
+    r.push(d);
+    if (d.f !== undefined) {
+      r.flashOn = !!d.f;
+      // If RemotePlayer has a spotlight/flashlight object, toggle its visibility automatically
+      if (r.spot) r.spot.visible = r.flashOn;
+      if (r.light) r.light.visible = r.flashOn;
+    }
+  }
 
   receive(d, conn) {
     if (!d || typeof d.t !== 'string') return;
     if (this.isHost) {
-      const id = conn.peer; // never trust a client-supplied id
+      const id = conn.peer;
       if (d.t !== 'hello' && !this.remotes.has(id)) return;
       switch (d.t) {
         case 'hello': {
           if (!this.conns.has(id) || this.remotes.has(id)) return;
-          const players = [{id: this.peer.id, name: this.name, alive: this.alive}];
-          for (const r of this.remotes.values()) players.push({id: r.id, name: r.name, alive: r.alive});
-          conn.send({t: 'welcome', seed: this.seed, level: this.g.level, players});
+          const players = [{ id: this.peer.id, name: this.name, alive: this.alive }];
+          for (const r of this.remotes.values()) players.push({ id: r.id, name: r.name, alive: r.alive });
+          conn.send({ t: 'welcome', seed: this.seed, level: this.g.level, players });
           this.addRemote(id, d.name);
-          this.broadcast({t: 'join', id, name: clean(d.name)}, conn);
+          this.broadcast({ t: 'join', id, name: clean(d.name) }, conn);
+          if (this.g.monster) this.g.monster.fullT = 0;
+          this.share.emitMonster(true); // Send full initial trail + broken lights to new joiner
           this.g.say(clean(d.name) + ' JOINED', 1800);
           break;
         }
         case 's':
-          if (finite(d)) { this.remotes.get(id).push(d); this.broadcast({t: 's', id, x: d.x, y: d.y, z: d.z, yaw: d.yaw, pitch: d.pitch}, conn) }
+          if (finite(d)) {
+            this._applyRemoteState(this.remotes.get(id), d);
+            this.broadcast({ t: 's', id, x: d.x, y: d.y, z: d.z, yaw: d.yaw, pitch: d.pitch, f: d.f ? 1 : 0 }, conn);
+          }
+          break;
+        case 'monster-flash':
+          if (this.conns.get(id) === conn) this.g.monster?.acceptFlash?.(id, d, true);
           break;
         case 'player-death': case 'player-alive':
-          this.setAlive(id, d.t === 'player-alive'); this.broadcast({t: d.t, id}, conn); break;
-        case 'monster-state': // clients never author these; drop anything they claim
-          break;
-        case 'world-event': // clients request, the host decides
+          this.setAlive(id, d.t === 'player-alive'); this.broadcast({ t: d.t, id }, conn); break;
+        case 'world-event':
           if (d.e === 'escape') this.escape();
-          // a client ran out of battery: the blackout is a shared world event,
-          // so the host re-applies it for itself and relays it to everyone else
           else if (d.e === 'power') this.share.world('power');
           break;
         case 'escape': this.escape(); break;
@@ -333,14 +276,14 @@ export class Multiplayer {
       case 'welcome':
         if (this.coop) break;
         this.disarm(); this.coop = true; this.alive = true;
-    this.share.attach(); this.share.host = false;
+        this.share.attach(); this.share.host = false;
         for (const p of d.players || []) this.addRemote(p.id, p.name, p.alive !== false);
         this.startLevel(d.seed, d.level);
         this.status(`CONNECTED TO ROOM ${this.room}`); $('lb-enter').style.display = 'inline-block';
         break;
       case 'join': this.addRemote(d.id, d.name); this.g.say(clean(d.name) + ' JOINED', 1800); break;
       case 'leave': this.removeRemote(d.id); break;
-      case 's': if (finite(d)) this.remotes.get(d.id)?.push(d); break;
+      case 's': if (finite(d)) this._applyRemoteState(this.remotes.get(d.id), d); break;
       case 'player-death': case 'player-alive': this.setAlive(d.id, d.t === 'player-alive'); break;
       case 'escape': if (Number.isInteger(d.seed) && Number.isInteger(d.level)) this.startLevel(d.seed, d.level); break;
       case 'monster-state': case 'world-event': this.share.receive(d); break;
@@ -348,12 +291,10 @@ export class Multiplayer {
     }
   }
 
-  // ---------- game events ----------
-  // whole team moves to a new, identically-seeded level (host authoritative)
   escape() {
-    if (!this.isHost) return this.emit({t: 'world-event', e: 'escape'});
+    if (!this.isHost) return this.emit({ t: 'world-event', e: 'escape' });
     const seed = newSeed(), level = this.g.level + 1;
-    this.share.world('level', {seed, level});
+    this.share.world('level', { seed, level });
     this.startLevel(seed, level);
   }
   startLevel(seed, level) {
@@ -361,18 +302,17 @@ export class Multiplayer {
     this.seed = seed; this.spectating = false; this.wipeT = 0;
     if (this.follow) this.follow.hidden = false;
     this.follow = null;
-    for (const r of this.remotes.values()) { r.alive = true; r.hidden = false; r.buf.length = 0 }
+    for (const r of this.remotes.values()) { r.alive = true; r.hidden = false; r.buf.length = 0; }
     g.level = level - 1;
     if (g.dead) g.respawn(seed); else g.newLevel(seed);
-    if (!this.alive) { this.alive = true; this.emit({t: 'player-alive', id: this.peer?.id}) }
+    if (!this.alive) { this.alive = true; this.emit({ t: 'player-alive', id: this.peer?.id }); }
     this.roster();
   }
   die() {
     if (!this.alive) return;
-    this.alive = false; this.emit({t: 'player-death', id: this.peer?.id}); this.roster();
+    this.alive = false; this.emit({ t: 'player-death', id: this.peer?.id }); this.roster();
   }
-  // called once the jumpscare finishes
-  spectate() { this.spectating = true; this.nextTarget() }
+  spectate() { this.spectating = true; this.nextTarget(); }
   nextTarget() {
     const alive = [...this.remotes.values()].filter(r => r.alive);
     if (this.follow) this.follow.hidden = false;
@@ -382,7 +322,6 @@ export class Multiplayer {
     this.roster();
   }
 
-  // ---------- per-frame hook (called from Game loop) ----------
   update(dt) {
     if (!this.coop) return;
     for (const r of this.remotes.values()) r.update();
@@ -391,18 +330,21 @@ export class Multiplayer {
       this.sendT = SEND;
       if (this.alive && !this.g.dead) {
         E.setFromQuaternion(cam.quaternion);
-        this.emit({t: 's', id: this.peer?.id, x: cam.position.x, y: cam.position.y, z: cam.position.z, yaw: E.y, pitch: E.x});
+        this.emit({
+          t: 's', id: this.peer?.id,
+          x: cam.position.x, y: cam.position.y, z: cam.position.z,
+          yaw: E.y, pitch: E.x,
+          f: (this.g.flash?.on && !this.g.dark) ? 1 : 0
+        });
       }
     }
     if (this.spectating) {
-      if (this.follow && !this.follow.alive) { this.follow.hidden = false; this.follow = null }
+      if (this.follow && !this.follow.alive) { this.follow.hidden = false; this.follow = null; }
       if (!this.follow && [...this.remotes.values()].some(r => r.alive)) this.nextTarget();
-      if (this.follow) { cam.position.copy(this.follow.pos); E.set(this.follow.pitch, this.follow.yaw, 0); cam.quaternion.setFromEuler(E) }
-      // host restarts the team once everybody is lost
+      if (this.follow) { cam.position.copy(this.follow.pos); E.set(this.follow.pitch, this.follow.yaw, 0); cam.quaternion.setFromEuler(E); }
       if (this.isHost && ![...this.remotes.values()].some(r => r.alive)) {
         if ((this.wipeT += dt) > WIPE_DELAY) this.escape();
       } else this.wipeT = 0;
     }
   }
 }
-
